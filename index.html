@@ -2019,15 +2019,22 @@ function plMoonEvents(y,m,d,lat,lon){
 function plHM(h){ if(h==null||isNaN(h)) return 'n/d'; const hh=Math.floor(h), mm=Math.round((h-hh)*60); return String(hh).padStart(2,'0')+':'+String(mm%60).padStart(2,'0'); }
 function plBell(h,c,w){ if(c==null) return 0; let d=Math.abs(h-c); d=Math.min(d,24-d); return Math.exp(-(d*d)/(2*w*w)); }
 
-let PL_ASTRO=null, PL_CURRBYHOUR=null, PL_GRID=null;
+let PL_ASTRO=null, PL_CURRBYHOUR=null, PL_WINDBYHOUR=null, PL_GRID=null;
+// Vento (nodi): fattore di attivita'/pescabilita'. Ottimale brezza 3-14 kn.
+function plWindFactor(kn){ if(kn==null||isNaN(kn)) return 0.5;
+  if(kn<3) return 0.45;     // calma piatta: predatori diffidenti / in profondita'
+  if(kn<=14) return 1.0;    // brezza-onda corta: attiva la predazione di superficie, troll efficace
+  if(kn<=20) return 0.6;    // teso: pescabile ma scomodo
+  return 0.25; }            // forte: quasi impescabile
 function plTemporalScore(h){
   const a=PL_ASTRO; if(!a) return 0.5;
   const major=Math.max(plBell(h,a.transit,1.0), plBell(h,(a.transit+12)%24,1.0));
   const minor=Math.max(plBell(h,a.rise,0.8), plBell(h,a.set,0.8));
   const sun=Math.max(plBell(h,a.sunrise,1.3), plBell(h,a.sunset,1.3));
   const curr=PL_CURRBYHOUR?(PL_CURRBYHOUR[h]||0):0;
+  const wind=PL_WINDBYHOUR?plWindFactor(PL_WINDBYHOUR[h]):0.5;
   const phaseBoost=0.85+0.3*(2*Math.abs(a.phase-0.5));   // luna nuova/piena -> piu' alto
-  return phaseBoost*(1.0*major+0.6*minor+0.8*sun+0.7*curr)/3.1;
+  return phaseBoost*(1.0*major+0.6*minor+0.8*sun+0.7*curr+0.6*wind)/3.7;
 }
 function plGrad(V,i,j,N){ const v=V[i][j]; if(isNaN(v)) return NaN; let g=0,n=0;
   [[i-1,j],[i+1,j],[i,j-1],[i,j+1]].forEach(([a,b])=>{ if(a>=0&&a<N&&b>=0&&b<N&&!isNaN(V[a][b])){ g=Math.max(g,Math.abs(v-V[a][b])); n++; } });
@@ -2097,13 +2104,18 @@ function plScoreRender(hour){
       'Indice: '+(x.spatial*100).toFixed(0)+'/100<br>'+
       'SST: '+(isNaN(x.t)?'n/d':x.t.toFixed(1)+'&deg;C')+' &middot; fronte termico '+(x.fSst*100).toFixed(0)+'%<br>'+
       'Clorofilla: '+(isNaN(x.c)?'n/d':x.c.toPrecision(2))+' mg/m&sup3; &middot; fronte '+(x.fEdge*100).toFixed(0)+'%<br>'+
-      'Corrente '+String(hour).padStart(2,'0')+':00: '+x.curr.toFixed(2)+' kn &middot; struttura '+(x.fStr*100).toFixed(0)+'%<br>'+
+      'Corrente+marea '+String(hour).padStart(2,'0')+':00: '+x.curr.toFixed(2)+' kn &middot; struttura '+(x.fStr*100).toFixed(0)+'%<br>'+
       '<small>'+(x.blue?'Lato oligotrofico del fronte: predatori solitari in agguato dall\'acqua blu.':'Lato produttivo sopra struttura: mangianze e tonni di branco.')+'</small>');
   });
   const a=PL_ASTRO; let bestH=8,bestS=-1; for(let h=8;h<=15;h++){ const s=plTemporalScore(h); if(s>bestS){bestS=s;bestH=h;} }
+  const dDato = currentDate().split('-').reverse().join('/');
+  const winOut = a && (a.sunrise<8 && a.sunset>15 && (a.transit<8 || a.transit>15));   // alba/tramonto/transito fuori orario gara
   frontInfo.innerHTML='<b style="color:#ff1493">'+top.length+' hot-spot pelagici</b> nel campo &middot; ora '+String(hour).padStart(2,'0')+':00<br>'+
-    '<small>Alalunga (blu) + tonno di branco (verde) &middot; pesi bilanciati SST/clorofilla/corrente/struttura<br>'+
-    (a?'Sole '+plHM(a.sunrise)+'&ndash;'+plHM(a.sunset)+' &middot; Luna '+Math.round(a.phase*100)+'% (transito '+plHM(a.transit)+') &middot; <b>miglior finestra ~'+plHM(bestH)+'</b>':'')+'</small>';
+    '<small><b style="color:#ffd84a">&#9888; Hot-spot da SATELLITE del '+dDato+'</b> (il 21/06 non esiste ancora): pattern recente, NON il giorno gara. Vento/corrente sono previsione 21/06.<br>'+
+    'Spaziale: SST/clorofilla/corrente+marea/struttura (bilanciati) &middot; Temporale: luna/sole/corrente/vento<br>'+
+    (a?'Sole '+plHM(a.sunrise)+'&ndash;'+plHM(a.sunset)+' &middot; Luna ~'+Math.round(a.phase*100)+'% (stima) &middot; transito '+plHM(a.transit)+
+       ' &middot; <b>finestra interna ~'+plHM(bestH)+'</b>'+(winOut?' &middot; <i>alba/luna fuori orario gara: ranking guidato da corrente+vento</i>':'')
+     :'')+'</small>';
 }
 async function computePelagicHotspots(){
   if(!PL_ASTRO){ const [Y,M,D]=GARA_DATE.split('-').map(Number);
@@ -2116,6 +2128,11 @@ async function computePelagicHotspots(){
       meteoData.curr.forEach(c=>{ const cv=c.hourly.ocean_current_velocity[ti]; if(cv!=null){ sum+=cv*0.539957; cnt++; } });
       tmp[h]=cnt?sum/cnt:0; mx=Math.max(mx,tmp[h]); }
     PL_CURRBYHOUR={}; for(let h=0;h<24;h++) PL_CURRBYHOUR[h]=mx>0?tmp[h]/mx:0; }
+  if(meteoData && !PL_WINDBYHOUR){ PL_WINDBYHOUR={};
+    for(let h=0;h<24;h++){ const ti=meteoData.times.indexOf(GARA_DATE+'T'+String(h).padStart(2,'0')+':00');
+      if(ti<0){ PL_WINDBYHOUR[h]=null; continue; } let sum=0,cnt=0;
+      meteoData.wind.forEach(w=>{ const ws=w.hourly.wind_speed_10m[ti]; if(ws!=null){ sum+=ws; cnt++; } });  // gia' in nodi
+      PL_WINDBYHOUR[h]=cnt?sum/cnt:null; } }
   if(!PL_GRID) await plSampleGrid();
   plScoreRender(garaShowHour||10);
 }
