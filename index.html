@@ -1781,6 +1781,23 @@ const G_TOTAL = G_KF[G_KF.length-1].t;   // 420 min
 const G_SEGCOL = { transfer:'#f7dc78', calata:'#2bd6ff', fish:'#27c46b', recover:'#ff9f4a', end:'#27c46b' };
 const G_SEGLBL = { transfer:'TRASFERIMENTO 21 nd', calata:'CALO SPREAD', fish:'IN PESCA', recover:'RECUPERO CANNE', end:'FINE' };
 
+// Timeline ATTIVA: di default i 4 spot; se esiste il percorso ALALUNGA, usa quello.
+let G_ACTIVE_KF = G_KF, G_ACTIVE_TOTAL = G_TOTAL;
+function buildAlaKF(){
+  if(!PL_ROUTE || !PL_ROUTE.seq || !PL_ROUTE.seq.length) return null;
+  const S=8.5, kf=[{t:0, p:[PL_ROUTE.start.la,PL_ROUTE.start.lo], seg:'transfer', txt:'Raduno &rarr; Sosta 1'}];
+  PL_ROUTE.seq.forEach((s,k)=>{
+    const tArr=Math.round((s.arr-S)*60), tEnd=tArr+Math.round(PL_SOSTA*60);
+    kf.push({t:tArr, p:[s.la,s.lo], seg:'fish', txt:'SOSTA '+(k+1)+' &middot; pesca (~'+plHM(s.arr)+')'});
+    kf.push({t:tEnd, p:[s.la,s.lo], seg:'transfer', txt:(k<PL_ROUTE.seq.length-1)?('Sosta '+(k+1)+' &rarr; Sosta '+(k+2)):'Rientro al Raduno'});
+  });
+  const last=PL_ROUTE.seq[PL_ROUTE.seq.length-1];
+  const back=plNmDist(last.la,last.lo,PL_ROUTE.start.la,PL_ROUTE.start.lo)/PL_SPEED;
+  const tHome=Math.round((last.arr-S)*60 + PL_SOSTA*60 + back*60);
+  kf.push({t:tHome, p:[PL_ROUTE.start.la,PL_ROUTE.start.lo], seg:'end', txt:'Rientro Raduno &middot; '+plHM(S+tHome/60)});
+  return {kf, total:Math.max(tHome,1)};
+}
+
 const garaBtn = document.getElementById('garaPlayBtn');
 const garaInfo = document.getElementById('garaInfo');
 const gTicker = document.getElementById('ticker');
@@ -1788,15 +1805,16 @@ const G_TICKER_HTML = gTicker.innerHTML;   // struttura originale (percorso manu
 let garaRAF = null, garaBoat = null, garaTrail = null;
 
 function garaPosAt(tmin){
-  if (tmin <= 0) return { ll:G_KF[0].p, seg:G_KF[0].seg, txt:G_KF[0].txt };
-  for (let i=0; i<G_KF.length-1; i++){
-    if (tmin < G_KF[i+1].t){
-      const a = G_KF[i], b = G_KF[i+1];
+  const KF = G_ACTIVE_KF;
+  if (tmin <= 0) return { ll:KF[0].p, seg:KF[0].seg, txt:KF[0].txt };
+  for (let i=0; i<KF.length-1; i++){
+    if (tmin < KF[i+1].t){
+      const a = KF[i], b = KF[i+1];
       const f = (tmin - a.t) / (b.t - a.t || 1);
       return { ll:[ a.p[0]+(b.p[0]-a.p[0])*f, a.p[1]+(b.p[1]-a.p[1])*f ], seg:a.seg, txt:a.txt };
     }
   }
-  const last = G_KF[G_KF.length-1];
+  const last = KF[KF.length-1];
   return { ll:last.p, seg:'end', txt:last.txt };
 }
 
@@ -1812,12 +1830,15 @@ function garaStart(){
   // niente conflitti con gli altri animatori
   if (typeof stopPlay === 'function') stopPlay();
   if (typeof stopAnim === 'function') stopAnim();
-  if (!document.getElementById('chkRoute').checked){
-    document.getElementById('chkRoute').checked = true; garaRouteLayer.addTo(map);
-  }
+  // usa il percorso ALALUNGA se calcolato, altrimenti i 4 spot (fallback)
+  const ala = buildAlaKF();
+  if (ala){ G_ACTIVE_KF = ala.kf; G_ACTIVE_TOTAL = ala.total;
+    const c = document.getElementById('chkAlaRoute'); if (c && !c.checked){ c.checked = true; plRouteLayer.addTo(map); } }
+  else { G_ACTIVE_KF = G_KF; G_ACTIVE_TOTAL = G_TOTAL;
+    if (!document.getElementById('chkRoute').checked){ document.getElementById('chkRoute').checked = true; garaRouteLayer.addTo(map); } }
   garaBoatLayer.clearLayers();
   garaTrail = L.polyline([], { color:'#27c46b', weight:4, opacity:0.95 }).addTo(garaBoatLayer);
-  garaBoat  = L.circleMarker(G_KF[0].p, { radius:8, color:'#fff', weight:2,
+  garaBoat  = L.circleMarker(G_ACTIVE_KF[0].p, { radius:8, color:'#fff', weight:2,
     fillColor:'#27c46b', fillOpacity:1 }).addTo(garaBoatLayer);
   garaBtn.classList.add('playing');
   garaBtn.innerHTML = '&#10073;&#10073; Stop animazione';
@@ -1830,7 +1851,7 @@ function garaStart(){
   let lastSeg = null;
   function frame(now){
     let f = (now - t0) / DUR; if (f > 1) f = 1;
-    const tmin = f * G_TOTAL;
+    const tmin = f * G_ACTIVE_TOTAL;
     const st = garaPosAt(tmin);
     garaBoat.setLatLng(st.ll); garaTrail.addLatLng(st.ll);
     garaBoat.setStyle({ fillColor: G_SEGCOL[st.seg] || '#27c46b' });
@@ -1842,7 +1863,7 @@ function garaStart(){
     if (f < 1){ garaRAF = requestAnimationFrame(frame); }
     else { garaRAF = null; garaBtn.classList.remove('playing');
       garaBtn.innerHTML = '&#9654; Rivedi la giornata di gara';
-      garaInfo.innerHTML = '<b>Gara conclusa (15:30).</b> Premi di nuovo per rivedere, o tocca gli spot per i dettagli.'; }
+      garaInfo.innerHTML = '<b>Giornata conclusa (rientro '+clockStr(G_START_MIN + G_ACTIVE_TOTAL)+').</b> Premi di nuovo per rivedere, o tocca le soste per i dettagli.'; }
   }
   garaRAF = requestAnimationFrame(frame);
 }
