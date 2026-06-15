@@ -789,6 +789,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div class="chkrow"><input type="checkbox" id="chkAlaRoute" checked><label for="chkAlaRoute">Percorso alalunga (nuovo)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkPelagic" checked><label for="chkPelagic">Hot-spot pelagici (indice)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkCatch" checked><label for="chkCatch">Catture storiche (71)</label></div>
+  <div class="chkrow"><input type="checkbox" id="chkForaggio" checked><label for="chkForaggio">Mappa pesce foraggio</label></div>
+  <div class="chkrow"><input type="checkbox" id="chkCampoFront" checked><label for="chkCampoFront">Fronti di pesca (campo)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkIso" checked><label for="chkIso">Isobate &ge;200 m (EMODnet)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkWind"><label for="chkWind">Vento orario (21/6, Open-Meteo)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkCurr"><label for="chkCurr">Correnti orarie (21/6, Open-Meteo)</label></div>
@@ -2481,6 +2483,11 @@ async function computeCampoFronts(){
     '. Sono questi i bordi di caccia dei pelagici. <b>I fronti migrano: rilancia il 21/6.</b>';
 }
 campoFrontBtn.addEventListener('click', computeCampoFronts);
+
+// (b+c) checkbox mostra/nascondi anche per i layer della sessione parallela
+// (definiti qui sopra, quindi bindabili senza errori di TDZ)
+bindGaraToggle('chkForaggio', foraggioLayer);
+bindGaraToggle('chkCampoFront', campoFrontLayer);
 
 // Avvio
 refreshLayer();
