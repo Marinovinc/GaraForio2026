@@ -785,7 +785,10 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div class="chkrow"><input type="checkbox" id="chkCampo" checked><label for="chkCampo">Campo gara (vertici N&middot;E&middot;S&middot;W)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkHot" checked><label for="chkHot">Hotspot &alpha; &beta; &gamma;</label></div>
   <div class="chkrow"><input type="checkbox" id="chkReef" checked><label for="chkReef">Secche R1&ndash;R5 + La Fossa</label></div>
-  <div class="chkrow"><input type="checkbox" id="chkRoute" checked><label for="chkRoute">Percorso ottimale (4 spot)</label></div>
+  <div class="chkrow"><input type="checkbox" id="chkRoute"><label for="chkRoute">Percorso 4-spot (vecchio)</label></div>
+  <div class="chkrow"><input type="checkbox" id="chkAlaRoute" checked><label for="chkAlaRoute">Percorso alalunga (nuovo)</label></div>
+  <div class="chkrow"><input type="checkbox" id="chkPelagic" checked><label for="chkPelagic">Hot-spot pelagici (indice)</label></div>
+  <div class="chkrow"><input type="checkbox" id="chkCatch" checked><label for="chkCatch">Catture storiche (71)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkIso" checked><label for="chkIso">Isobate &ge;200 m (EMODnet)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkWind"><label for="chkWind">Vento orario (21/6, Open-Meteo)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkCurr"><label for="chkCurr">Correnti orarie (21/6, Open-Meteo)</label></div>
@@ -2348,6 +2351,11 @@ document.getElementById('expRouteGpx').addEventListener('click', () => {
   const gpx='<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="GaraForio2026" xmlns="http://www.topografix.com/GPX/1/1">\n'+wpt+'\n'+rte+'\n</gpx>';
   download('percorso_alalunga_'+GARA_DATE+'.gpx', gpx, 'application/gpx+xml');
 });
+
+// checkbox mostra/nascondi per i layer pelagici (riusa bindGaraToggle)
+bindGaraToggle('chkAlaRoute', plRouteLayer);
+bindGaraToggle('chkPelagic', frontLayer);
+bindGaraToggle('chkCatch', garaCatchLayer);
 
 // =========================================================================
 // === ZONE PESCE FORAGGIO (proxy da clorofilla) ===========================
