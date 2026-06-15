@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guida - Gara Forio 2026</title>
+<style>
+  :root{ --bg:#0b1220; --card:#13213a; --line:#24375c; --txt:#e8eef6; --mut:#9fb0c8; --acc:#f7dc78; --acc2:#e94560; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--txt); font-family:"Helvetica Neue",Arial,sans-serif; line-height:1.5; }
+  header{ background:linear-gradient(135deg,#16284a,#0b1220); padding:22px 18px; border-bottom:2px solid var(--acc2); }
+  header h1{ margin:0; font-size:22px; }
+  header h1 span{ color:var(--acc); }
+  header p{ margin:6px 0 0; color:var(--mut); font-size:14px; }
+  main{ max-width:820px; margin:0 auto; padding:18px; }
+  section{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:16px 0; }
+  h2{ font-size:18px; margin:0 0 10px; color:#fff; border-left:4px solid var(--acc); padding-left:10px; }
+  h3{ font-size:15px; margin:16px 0 6px; color:var(--acc); }
+  p,li{ font-size:14.5px; color:#d7e0ec; }
+  img{ max-width:100%; border-radius:10px; border:1px solid var(--line); display:block; margin:10px 0; box-shadow:0 4px 16px rgba(0,0,0,.4); }
+  .small{ max-width:300px; }
+  .row{ display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start; }
+  .row img{ flex:1; min-width:200px; max-width:48%; }
+  table{ width:100%; border-collapse:collapse; margin:8px 0; font-size:13.5px; }
+  td{ border-bottom:1px solid var(--line); padding:7px 6px; vertical-align:top; }
+  td:first-child{ color:var(--acc); white-space:nowrap; font-weight:600; }
+  .dot{ display:inline-block; width:13px; height:13px; border-radius:50%; border:2px solid #fff; vertical-align:middle; margin-right:5px; }
+  .tip{ background:#0e1b30; border-left:3px solid #27c46b; border-radius:6px; padding:9px 12px; margin:10px 0; font-size:13.5px; color:#bcd; }
+  .warn{ background:#2a1722; border-left:3px solid var(--acc2); border-radius:6px; padding:9px 12px; margin:10px 0; font-size:13.5px; color:#ffd0d8; }
+  a.btn{ display:inline-block; background:var(--acc2); color:#fff; text-decoration:none; padding:10px 16px; border-radius:8px; font-weight:600; margin-top:8px; }
+  kbd{ background:#1e3358; border:1px solid var(--line); border-radius:4px; padding:1px 6px; font-size:13px; }
+  footer{ text-align:center; color:var(--mut); font-size:12px; padding:20px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Guida rapida &mdash; <span>Gara Forio 2026</span></h1>
+  <p>Come usare la mappa, il pannello <b>Filtri</b> e il tracking della barca. Trofeo Open Ischia Big Game &middot; 21 giugno.</p>
+</header>
+<main>
+
+  <section>
+    <h2>1. Aprire i comandi (Filtri)</h2>
+    <p>Sul <b>telefono</b> la mappa parte a schermo pieno. Per aprire i comandi tocca il tasto <b>Filtri</b> in alto a <b>sinistra</b>. Per richiuderlo, ritocca <b>Filtri</b>.</p>
+    <div class="row">
+      <img src="guida_img/mobile_closed.png" alt="App chiusa">
+      <img src="guida_img/mobile_open.png" alt="Pannello aperto">
+    </div>
+    <p class="small" style="color:var(--mut);font-size:12.5px;">A sinistra: avvio (mappa piena, tasto Filtri). A destra: pannello aperto.</p>
+    <div class="tip">Lo zoom <b>+/&minus;</b> e il cambio mappa restano in alto a destra. La <b>legenda</b> in basso a destra: toccane il titolo per aprirla/chiuderla.</div>
+  </section>
+
+  <section>
+    <h2>2. Il pannello &ldquo;PIANO DI GARA&rdquo; &mdash; gli interruttori</h2>
+    <p>Ogni spunta <b>mostra o nasconde</b> un elemento sulla mappa. Accendi solo quello che ti serve per non confonderti.</p>
+    <img src="guida_img/panel.png" alt="Pannello filtri">
+    <table>
+      <tr><td>Campo gara</td><td>Il perimetro ufficiale (vertici N&middot;E&middot;S&middot;W).</td></tr>
+      <tr><td>Hotspot &alpha; &beta; &gamma;</td><td>I 3 hotspot storici del briefing (drop-off nord, centro, salto SW).</td></tr>
+      <tr><td>Secche R1&ndash;R5</td><td>Le secche e La Fossa (strutture che concentrano il pesce).</td></tr>
+      <tr><td>Percorso 4-spot (vecchio)</td><td>Il vecchio percorso. <b>Spento di default.</b></td></tr>
+      <tr><td>Percorso alalunga (nuovo)</td><td>Il percorso ottimale calcolato sulle catture reali (<b>linea gialla</b>).</td></tr>
+      <tr><td>Hot-spot pelagici</td><td>I punti migliori calcolati: <span class="dot" style="background:#1f6bff"></span>blu = alalunga/aguglia/spada &middot; <span class="dot" style="background:#ff1493"></span>rosa = tonno di branco.</td></tr>
+      <tr><td>Catture storiche (71)</td><td>I punti <b>reali</b> dove si &egrave; pescato, colore per specie.</td></tr>
+      <tr><td>Mappa pesce foraggio</td><td>Zone ricche di clorofilla (foraggio) &mdash; si disegna col pulsante apposito.</td></tr>
+      <tr><td>Fronti di pesca</td><td>I fronti (bordi ricco/povero) nel campo &mdash; pulsante apposito.</td></tr>
+      <tr><td>Traccia barca (GPS)</td><td>La rotta <b>reale</b> registrata dal tuo telefono (azzurra).</td></tr>
+      <tr><td>Isobate &ge;200 m</td><td>Le linee di profondit&agrave; (batimetria EMODnet).</td></tr>
+      <tr><td>Vento / Correnti orarie</td><td>Le frecce meteo previste per il 21/6, ora per ora.</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>3. I pulsanti</h2>
+    <h3>&#9654; Anima la giornata di gara</h3>
+    <p>Simula l'intera giornata (~48&nbsp;s): la barca verde segue il <b>percorso alalunga</b>, dalle 08:30, in pesca fino alle <b>15:30</b>, poi rientro al porto (extra, fuori gara). L'orologio e le frecce meteo seguono l'ora.</p>
+    <h3>Inquadra il campo gara</h3>
+    <p>Centra la mappa sul campo se ti sei allontanato con lo zoom.</p>
+    <h3>Calcola indice pelagico / Percorso ottimale alalunga</h3>
+    <p>Ricalcolano gli hot-spot e il percorso col dato satellitare del giorno selezionato. <b>Il giorno della gara, riapri l'app e ricalcola</b>: si tara sulle condizioni reali.</p>
+    <h3>Esporta &hellip; GPX</h3>
+    <p>Scaricano hot-spot, percorso o traccia in formato <b>GPX</b>, da caricare sul <b>GPS/cartografico di bordo</b>.</p>
+    <div class="warn"><b>Onest&agrave;:</b> i dati satellitari (clorofilla/temperatura) sono di pochi giorni prima &mdash; il 21/6 non esiste ancora. Gli hot-spot poggiano soprattutto sulle <b>catture reali</b>; meteo e correnti sono invece <b>previsti</b> per il 21/6.</div>
+  </section>
+
+  <section>
+    <h2>4. Tracking della barca</h2>
+    <p>Per registrare la rotta reale durante la gara:</p>
+    <ul>
+      <li>Tocca <b>&#9679; Registra traccia barca</b> e <b>consenti la posizione</b> quando il telefono lo chiede.</li>
+      <li>La barca azzurra ti segue e la rotta si disegna in tempo reale. I dati restano salvati anche se ricarichi la pagina o perdi il segnale.</li>
+      <li>A fine giornata: <b>Salva traccia</b> (resta nella lista &ldquo;tracce salvate&rdquo;), oppure <b>Esporta traccia GPX</b> per il GPS/PC.</li>
+      <li>Dalla lista puoi <b>mostrare</b>, <b>scaricare GPX</b> o <b>eliminare</b> ogni traccia salvata.</li>
+    </ul>
+    <div class="tip">Il tracking richiede connessione/GPS attivo e funziona meglio col telefono in carica. Tienilo aperto durante la pesca.</div>
+  </section>
+
+  <section>
+    <h2>5. La legenda e cosa vedi sulla mappa</h2>
+    <img src="guida_img/overview.png" alt="Vista d'insieme">
+    <table>
+      <tr><td><span class="dot" style="background:#1f6bff"></span> / <span class="dot" style="background:#ff1493"></span></td><td>Hot-spot pelagici (blu = acqua blu/alalunga, rosa = produttivo/branco), numerati per priorit&agrave;.</td></tr>
+      <tr><td>Pallini colorati</td><td>Catture storiche (blu alalunga, arancio tonno, rosso spada, grigio marche).</td></tr>
+      <tr><td style="color:#ffd84a">Linea gialla</td><td>Percorso ottimale alalunga (soste numerate con orario).</td></tr>
+      <tr><td style="color:#00e5ff">Linea azzurra</td><td>La tua traccia GPS reale.</td></tr>
+    </table>
+    <img src="guida_img/legend.png" alt="Legenda" class="small">
+    <p>La legenda (in basso a destra) spiega la scala colore della clorofilla e i simboli. Tocca il titolo per <b>aprirla/chiuderla</b>.</p>
+  </section>
+
+  <section style="text-align:center">
+    <h2 style="border:0">Apri l'app</h2>
+    <a class="btn" href="https://marinovinc.github.io/GaraForio2026/">&#128031; Vai alla mappa gara</a>
+    <p style="color:var(--mut);font-size:12.5px;margin-top:12px;">Suggerimento: apri il link, poi &ldquo;Aggiungi a Home&rdquo; per usarla come un'app.</p>
+  </section>
+
+</main>
+<footer>Gara Forio 2026 &middot; Trofeo Open Ischia Big Game &middot; guida d'uso</footer>
+</body>
+</html>
