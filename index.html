@@ -793,6 +793,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <button id="garaPlayBtn">&#9654; Anima la giornata di gara (08:30&ndash;15:30)</button>
   <div id="garaInfo">Premi <b>Anima la giornata</b> per vedere la barca seguire i 4 spot con orari reali. Clicca campo/hotspot/secche/spot per i dettagli tattici.</div>
   <button id="garaFitBtn" style="width:100%; margin-top:6px;">Inquadra il campo gara</button>
+  <button id="campoFrontBtn" style="width:100%; margin-top:6px;">Disegna fronti di pesca (campo gara)</button>
+  <div class="desc" id="campoFrontInfo">Campiona la clorofilla DENTRO il campo e disegna i fronti (bordi ricco/povero) + i punti a gradiente piu' forte = dove cacciano i pelagici. Usa il dato del giorno selezionato.</div>
 
   <hr class="sep">
   <label for="productSelect">Sorgente satellitare</label>
@@ -834,7 +836,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <input type="checkbox" id="sstChk">
     <label for="sstChk">Temperatura mare (SST) sopra</label>
   </div>
-  <button id="frontBtn">Trova hot-spot pelagici (vista attuale)</button>
+  <button id="frontBtn">Calcola indice pelagico (campo gara)</button>
   <div class="desc" id="frontInfo">Il fronte (color line) e' il bordo tra acqua ricca e povera: campiona la vista corrente su un prodotto Mediterraneo.</div>
   <div class="row" style="margin-top:8px;">
     <button id="expCsv">Esporta punti CSV</button>
@@ -1469,9 +1471,9 @@ async function computeFront(){
     ' mg/m&sup3; &middot; mediana ' + med.toPrecision(2) + ' &middot; modo ' +
     (absMode ? 'assoluto' : 'relativo (oligotrofico)') + '</small>';
 }
-frontBtn.addEventListener('click', computeFront);
-// Primo calcolo automatico degli hot-spot all'avvio (cosi' i punti si vedono subito)
-setTimeout(() => { try { computeFront(); } catch(e){} }, 2800);
+frontBtn.addEventListener('click', computePelagicHotspots);
+// Primo calcolo automatico dell'indice pelagico all'avvio (campo gara)
+setTimeout(() => { try { computePelagicHotspots(); } catch(e){} }, 2800);
 
 // === EXPORT fronte KML ===
 document.getElementById('expKml').addEventListener('click', () => {
@@ -1962,6 +1964,165 @@ document.getElementById('chkWind').addEventListener('change', onMeteoToggle);
 document.getElementById('chkCurr').addEventListener('change', onMeteoToggle);
 
 // =========================================================================
+// === INDICE PELAGICO SCIENTIFICO (solo campo gara) =======================
+// Bersaglio: ALALUNGA + aguglia imperiale/spada (acqua BLU, lato oligotrofico
+// del fronte termico) E TONNI DI BRANCO (foraggio sul lato PRODUTTIVO del
+// fronte sopra secche/drop-off). Il modello premia il FRONTE (gradiente SST e
+// clorofilla), la CONVERGENZA di corrente e la STRUTTURA batimetrica - pesi
+// BILANCIATI - e distingue il lato (blu vs produttivo) per indicare la specie.
+// Modulazione temporale: solunar (luna), sole (alba/tramonto), marea/corrente.
+// Dati REALI: SST+chl Copernicus (giornaliero NRT) dentro il campo; corrente
+// oraria Open-Meteo; astronomia calcolata per il 21/06 sul centro campo.
+// =========================================================================
+const PL_RAD = Math.PI/180, PL_TZ = 2;   // CEST (Europe/Rome, giugno) = UTC+2
+
+function plSunTimes(y,m,d,lat,lon){
+  const N1=Math.floor(275*m/9), N2=Math.floor((m+9)/12), N3=1+Math.floor((y-4*Math.floor(y/4)+2)/3);
+  const Nday=N1-(N2*N3)+d-30;
+  function calc(rising){
+    const lngHour=lon/15, t=Nday+((rising?6:18)-lngHour)/24, M=(0.9856*t)-3.289;
+    let L=M+1.916*Math.sin(M*PL_RAD)+0.020*Math.sin(2*M*PL_RAD)+282.634; L=(L+360)%360;
+    let RA=Math.atan(0.91764*Math.tan(L*PL_RAD))/PL_RAD; RA=(RA+360)%360;
+    RA=RA+((Math.floor(L/90)*90)-(Math.floor(RA/90)*90)); RA/=15;
+    const sinDec=0.39782*Math.sin(L*PL_RAD), cosDec=Math.cos(Math.asin(sinDec));
+    const cosH=(Math.cos(90.833*PL_RAD)-sinDec*Math.sin(lat*PL_RAD))/(cosDec*Math.cos(lat*PL_RAD));
+    if (cosH>1||cosH<-1) return null;
+    let H=rising?360-Math.acos(cosH)/PL_RAD:Math.acos(cosH)/PL_RAD; H/=15;
+    let UT=(H+RA-0.06571*t-6.622-lngHour)%24; UT=(UT+24)%24;
+    return (UT+PL_TZ+24)%24;
+  }
+  return { sunrise:calc(true), sunset:calc(false) };
+}
+function plJD(ms){ return ms/86400000 + 2440587.5; }
+function plMoonRaDec(jd){
+  const d=jd-2451545.0, L=(218.316+13.176396*d)*PL_RAD, M=(134.963+13.064993*d)*PL_RAD, F=(93.272+13.229350*d)*PL_RAD;
+  const lon=L+6.289*PL_RAD*Math.sin(M), lat=5.128*PL_RAD*Math.sin(F), e=23.4397*PL_RAD;
+  return { ra:Math.atan2(Math.sin(lon)*Math.cos(e)-Math.tan(lat)*Math.sin(e), Math.cos(lon)),
+           dec:Math.asin(Math.sin(lat)*Math.cos(e)+Math.cos(lat)*Math.sin(e)*Math.sin(lon)) };
+}
+function plMoonAlt(ms,lat,lon){
+  const jd=plJD(ms), p=plMoonRaDec(jd), gmst=(280.16+360.9856235*(jd-2451545.0))*PL_RAD;
+  const H=gmst+lon*PL_RAD-p.ra;
+  return Math.asin(Math.sin(lat*PL_RAD)*Math.sin(p.dec)+Math.cos(lat*PL_RAD)*Math.cos(p.dec)*Math.cos(H))/PL_RAD;
+}
+function plMoonEvents(y,m,d,lat,lon){
+  const base=Date.UTC(y,m-1,d,0,0,0)-PL_TZ*3600000;   // 00:00 locale (ms UTC)
+  let prev=plMoonAlt(base,lat,lon), maxA=-99, maxH=0; const rises=[], sets=[];
+  for (let s=1;s<=144;s++){ const ms=base+s*600000, a=plMoonAlt(ms,lat,lon), h=s/6;
+    if (a>maxA){ maxA=a; maxH=h; }
+    if (prev<0&&a>=0) rises.push(h);
+    if (prev>=0&&a<0) sets.push(h);
+    prev=a; }
+  const D=(297.85+12.190749*(plJD(base+12*3600000)-2451545.0))*PL_RAD;
+  return { transit:maxH, rise:rises[0], set:sets[0], phase:(1-Math.cos(D))/2 };
+}
+function plHM(h){ if(h==null||isNaN(h)) return 'n/d'; const hh=Math.floor(h), mm=Math.round((h-hh)*60); return String(hh).padStart(2,'0')+':'+String(mm%60).padStart(2,'0'); }
+function plBell(h,c,w){ if(c==null) return 0; let d=Math.abs(h-c); d=Math.min(d,24-d); return Math.exp(-(d*d)/(2*w*w)); }
+
+let PL_ASTRO=null, PL_CURRBYHOUR=null, PL_GRID=null;
+function plTemporalScore(h){
+  const a=PL_ASTRO; if(!a) return 0.5;
+  const major=Math.max(plBell(h,a.transit,1.0), plBell(h,(a.transit+12)%24,1.0));
+  const minor=Math.max(plBell(h,a.rise,0.8), plBell(h,a.set,0.8));
+  const sun=Math.max(plBell(h,a.sunrise,1.3), plBell(h,a.sunset,1.3));
+  const curr=PL_CURRBYHOUR?(PL_CURRBYHOUR[h]||0):0;
+  const phaseBoost=0.85+0.3*(2*Math.abs(a.phase-0.5));   // luna nuova/piena -> piu' alto
+  return phaseBoost*(1.0*major+0.6*minor+0.8*sun+0.7*curr)/3.1;
+}
+function plGrad(V,i,j,N){ const v=V[i][j]; if(isNaN(v)) return NaN; let g=0,n=0;
+  [[i-1,j],[i+1,j],[i,j-1],[i,j+1]].forEach(([a,b])=>{ if(a>=0&&a<N&&b>=0&&b<N&&!isNaN(V[a][b])){ g=Math.max(g,Math.abs(v-V[a][b])); n++; } });
+  return n?g:NaN; }
+function plNmDist(la1,lo1,la2,lo2){ const R=3440.065, dLa=(la2-la1)*PL_RAD, m=(la1+la2)/2*PL_RAD, x=(lo2-lo1)*PL_RAD*Math.cos(m); return R*Math.sqrt(dLa*dLa+x*x); }
+const PL_STRUCT=[].concat(G_REEF.map(r=>r.ll), G_HOTSPOT.map(h=>h.ll));
+function plCurrentAt(la,lo,hour){
+  if(!meteoData) return 0;
+  const ti=meteoData.times.indexOf(GARA_DATE+'T'+String(hour).padStart(2,'0')+':00'); if(ti<0) return 0;
+  let best=1e9, kn=0;
+  meteoData.grid.forEach((pt,k)=>{ const d=plNmDist(la,lo,pt[0],pt[1]); if(d<best){ best=d; const cv=meteoData.curr[k].hourly.ocean_current_velocity[ti]; kn=(cv!=null)?cv*0.539957:0; } });
+  return kn;
+}
+async function plSampleGrid(){
+  const ring=[G_VERTICI.N.ll,G_VERTICI.E.ll,G_VERTICI.S.ll,G_VERTICI.W.ll];
+  const la0=ring.map(p=>p[0]), lo0=ring.map(p=>p[1]);
+  const laMin=Math.min(...la0), laMax=Math.max(...la0), loMin=Math.min(...lo0), loMax=Math.max(...lo0);
+  const N=8, lats=[], lons=[];
+  for(let i=0;i<N;i++) lats.push(laMax-(laMax-laMin)*i/(N-1));
+  for(let j=0;j<N;j++) lons.push(loMin+(loMax-loMin)*j/(N-1));
+  const idx=[]; for(let i=0;i<N;i++)for(let j=0;j<N;j++) idx.push([i,j]);
+  let done=0; frontInfo.textContent='Campiono SST + clorofilla nel campo... 0/'+idx.length;
+  const res=await pool(idx,6,async([i,j])=>{
+    const chl=await sampleValue(PRODUCTS.MED_L4,'MED_L4',lats[i],lons[j]);
+    const sstR=await sampleValue(PRODUCTS.SST_L4,'SST_L4',lats[i],lons[j]);
+    frontInfo.textContent='Campiono SST + clorofilla nel campo... '+(++done)+'/'+idx.length;
+    return { chl:(chl&&!chl.error&&chl.raw!=null)?chl.raw:NaN, sst:sstToC(sstR) };
+  });
+  PL_GRID={ N, lats, lons, ring,
+    chl:Array.from({length:N},(_,i)=>res.slice(i*N,i*N+N).map(r=>r.chl)),
+    sst:Array.from({length:N},(_,i)=>res.slice(i*N,i*N+N).map(r=>r.sst)) };
+  return PL_GRID;
+}
+function plScoreRender(hour){
+  if(!PL_GRID) return;
+  const {N,lats,lons,chl,sst,ring}=PL_GRID;
+  const flatChl=chl.flat().filter(v=>!isNaN(v)).sort((a,b)=>a-b);
+  const chlMed=flatChl.length?flatChl[Math.floor(flatChl.length/2)]:0;
+  const items=[];
+  for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+    if(!pointInPoly(lats[i],lons[j],ring)) continue;
+    const c=chl[i][j], t=sst[i][j];
+    if(isNaN(c)&&isNaN(t)) continue;
+    let dmin=1e9; PL_STRUCT.forEach(s=>{ const d=plNmDist(lats[i],lons[j],s[0],s[1]); if(d<dmin)dmin=d; });
+    items.push({ la:lats[i], lo:lons[j], c, t,
+      sstGrad:plGrad(sst,i,j,N), chlGrad:plGrad(chl,i,j,N), curr:plCurrentAt(lats[i],lons[j],hour),
+      structScore:Math.exp(-(dmin*dmin)/8), thermSuit:isNaN(t)?0.5:Math.exp(-Math.pow((t-20)/4,2)/2),
+      blue:!isNaN(c)&&c<chlMed });
+  }
+  if(!items.length){ frontInfo.textContent='Dati insufficienti nel campo (nuvole).'; return; }
+  const norm=key=>{ const a=items.map(x=>x[key]).filter(v=>!isNaN(v)); const mn=Math.min(...a),mx=Math.max(...a); return v=>(isNaN(v)||mx<=mn)?0:(v-mn)/(mx-mn); };
+  const nS=norm('sstGrad'), nC=norm('chlGrad'), nCu=norm('curr');
+  items.forEach(x=>{ x.fSst=nS(x.sstGrad); x.fEdge=nC(x.chlGrad); x.fCurr=nCu(x.curr); x.fStr=x.structScore;
+    x.spatial=(0.25*x.fSst+0.25*x.fEdge+0.25*x.fCurr+0.25*x.fStr)*(0.6+0.4*x.thermSuit); });
+  items.sort((a,b)=>b.spatial-a.spatial);
+  const top=items.slice(0,6);
+  frontLayer.clearLayers();
+  let n=0;
+  top.forEach(x=>{ n++;
+    const col=x.blue?'#1f6bff':'#ff1493';
+    const guild=x.blue?'Alalunga / aguglia / spada (lato blu)':'Tonno di branco (fronte produttivo)';
+    L.marker([x.la,x.lo],{ zIndexOffset:1000, icon:L.divIcon({className:'',iconSize:[32,32],iconAnchor:[16,16],
+      html:'<div style="width:28px;height:28px;border-radius:50%;background:'+col+';border:3px solid #fff;'+
+        'box-shadow:0 0 5px #000,0 0 16px '+col+';color:#fff;font:700 15px sans-serif;display:flex;'+
+        'align-items:center;justify-content:center;">'+n+'</div>'}) }).addTo(frontLayer).bindPopup(
+      '<b style="font-size:14px;color:'+col+'">PELAGIC HOTSPOT #'+n+'</b><br><b>'+guild+'</b><br>'+
+      'Indice: '+(x.spatial*100).toFixed(0)+'/100<br>'+
+      'SST: '+(isNaN(x.t)?'n/d':x.t.toFixed(1)+'&deg;C')+' &middot; fronte termico '+(x.fSst*100).toFixed(0)+'%<br>'+
+      'Clorofilla: '+(isNaN(x.c)?'n/d':x.c.toPrecision(2))+' mg/m&sup3; &middot; fronte '+(x.fEdge*100).toFixed(0)+'%<br>'+
+      'Corrente '+String(hour).padStart(2,'0')+':00: '+x.curr.toFixed(2)+' kn &middot; struttura '+(x.fStr*100).toFixed(0)+'%<br>'+
+      '<small>'+(x.blue?'Lato oligotrofico del fronte: predatori solitari in agguato dall\'acqua blu.':'Lato produttivo sopra struttura: mangianze e tonni di branco.')+'</small>');
+  });
+  const a=PL_ASTRO; let bestH=8,bestS=-1; for(let h=8;h<=15;h++){ const s=plTemporalScore(h); if(s>bestS){bestS=s;bestH=h;} }
+  frontInfo.innerHTML='<b style="color:#ff1493">'+top.length+' hot-spot pelagici</b> nel campo &middot; ora '+String(hour).padStart(2,'0')+':00<br>'+
+    '<small>Alalunga (blu) + tonno di branco (verde) &middot; pesi bilanciati SST/clorofilla/corrente/struttura<br>'+
+    (a?'Sole '+plHM(a.sunrise)+'&ndash;'+plHM(a.sunset)+' &middot; Luna '+Math.round(a.phase*100)+'% (transito '+plHM(a.transit)+') &middot; <b>miglior finestra ~'+plHM(bestH)+'</b>':'')+'</small>';
+}
+async function computePelagicHotspots(){
+  if(!PL_ASTRO){ const [Y,M,D]=GARA_DATE.split('-').map(Number);
+    const s=plSunTimes(Y,M,D,CAMPO_CENTER[0],CAMPO_CENTER[1]), mo=plMoonEvents(Y,M,D,CAMPO_CENTER[0],CAMPO_CENTER[1]);
+    PL_ASTRO={ sunrise:s.sunrise, sunset:s.sunset, transit:mo.transit, rise:mo.rise, set:mo.set, phase:mo.phase }; }
+  await loadMeteo();
+  if(meteoData && !PL_CURRBYHOUR){ const tmp={}; let mx=0;
+    for(let h=0;h<24;h++){ const ti=meteoData.times.indexOf(GARA_DATE+'T'+String(h).padStart(2,'0')+':00');
+      if(ti<0){ tmp[h]=0; continue; } let sum=0,cnt=0;
+      meteoData.curr.forEach(c=>{ const cv=c.hourly.ocean_current_velocity[ti]; if(cv!=null){ sum+=cv*0.539957; cnt++; } });
+      tmp[h]=cnt?sum/cnt:0; mx=Math.max(mx,tmp[h]); }
+    PL_CURRBYHOUR={}; for(let h=0;h<24;h++) PL_CURRBYHOUR[h]=mx>0?tmp[h]/mx:0; }
+  if(!PL_GRID) await plSampleGrid();
+  plScoreRender(garaShowHour||10);
+}
+// gli hot-spot seguono l'orologio di gara (corrente oraria) durante l'animazione
+try { const _plSync=syncMeteoHour; syncMeteoHour=function(absMin){ _plSync(absMin); if(PL_GRID) plScoreRender(Math.floor(absMin/60)%24); }; } catch(e){}
+
+// =========================================================================
 // === ZONE PESCE FORAGGIO (proxy da clorofilla) ===========================
 // ONESTO: NON e' un fish-finder. Campiona la clorofilla reale (GetFeatureInfo)
 // sulla vista corrente e marca i MASSIMI LOCALI sopra soglia: l'acqua ricca di
@@ -2023,6 +2184,68 @@ async function computeForage(){
     ' mg/m&sup3;). Proxy plancton&rarr;foraggio e bordi ricchi/poveri, <b>da confermare in mare</b>. Restano visibili durante l\'animazione.';
 }
 foraggioBtn.addEventListener('click', computeForage);
+
+// =========================================================================
+// === FRONTI DI PESCA NEL CAMPO GARA (data-driven, per i pelagici) =========
+// Campiona la clorofilla DENTRO il poligono del campo, disegna i fronti (bordi
+// ricco/povero, marching squares) e marca i punti a GRADIENTE massimo: e' li',
+// sui fronti, che si concentrano foraggio e pelagici (alalunga/spada/aguglia),
+// non sulle secche batimetriche. Dato del giorno selezionato (i fronti migrano).
+// =========================================================================
+const campoFrontLayer = L.layerGroup().addTo(map);
+const campoFrontBtn = document.getElementById('campoFrontBtn');
+const campoFrontInfo = document.getElementById('campoFrontInfo');
+async function computeCampoFronts(){
+  const key = sel.value, p = PRODUCTS[key];
+  if (!p.point){ campoFrontInfo.textContent = 'Serve un prodotto Mediterraneo (la sorgente PACE non da il valore puntuale).'; return; }
+  const ring = [G_VERTICI.N.ll, G_VERTICI.E.ll, G_VERTICI.S.ll, G_VERTICI.W.ll];
+  const la = ring.map(q=>q[0]), lo = ring.map(q=>q[1]);
+  const laMax=Math.max(...la), laMin=Math.min(...la), loMin=Math.min(...lo), loMax=Math.max(...lo);
+  const N = 14, lats = [], lons = [];
+  for (let i=0;i<N;i++) lats.push(laMax-(laMax-laMin)*i/(N-1));   // N -> S
+  for (let j=0;j<N;j++) lons.push(loMin+(loMax-loMin)*j/(N-1));   // W -> E
+  const cells = [];
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++) if (pointInPoly(lats[i],lons[j],ring)) cells.push([i,j]);
+  campoFrontBtn.disabled = true;
+  const val = Array.from({length:N}, () => new Array(N).fill(NaN));
+  let done = 0;
+  await pool(cells, 8, async ([i,j]) => {
+    const r = await sampleValue(p, key, lats[i], lons[j]);
+    campoFrontInfo.textContent = 'Analisi fronti nel campo... ' + (++done) + '/' + cells.length;
+    val[i][j] = (r && !r.error && r.raw != null) ? r.raw : NaN;
+  });
+  campoFrontBtn.disabled = false;
+  const valid = [];
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++) if (!isNaN(val[i][j])) valid.push(val[i][j]);
+  valid.sort((a,b)=>a-b);
+  if (valid.length < 12){ campoFrontInfo.textContent = 'Dati insufficienti nel campo (nuvole). Prova un altro giorno o il prodotto L4 gapfree.'; return; }
+  const thr = valid[Math.floor(valid.length/2)];   // mediana = soglia del fronte
+  campoFrontLayer.clearLayers();
+  const segs = marchingSquares(val, lats, lons, thr);
+  frontSegments = segs;   // abilita "Esporta fronte KML"
+  segs.forEach(s => L.polyline(s, { color:'#ff2bd6', weight:3, opacity:0.95 }).addTo(campoFrontLayer));
+  // GRADIENTE: i punti dove il fronte e' piu' netto = spot di caccia
+  const grads = [];
+  for (let i=1;i<N-1;i++) for (let j=1;j<N-1;j++){
+    const c=val[i][j], e=val[i][j+1], w=val[i][j-1], n=val[i-1][j], s=val[i+1][j];
+    if ([c,e,w,n,s].some(v=>isNaN(v))) continue;
+    const gx=(e-w)/2, gy=(s-n)/2;
+    grads.push({ lat:lats[i], lon:lons[j], g:Math.sqrt(gx*gx+gy*gy), v:c });
+  }
+  grads.sort((a,b)=>b.g-a.g);
+  const top = grads.slice(0, 5);
+  top.forEach((pt,idx) => {
+    const m = L.circleMarker([pt.lat,pt.lon], { radius:9, color:'#fff', weight:2, fillColor:'#ff7a1a', fillOpacity:0.9 });
+    m.bindTooltip('F'+(idx+1), { permanent:true, direction:'right', offset:[6,0], className:'gara-label spot' });
+    m.bindPopup('<b>Punto di fronte F'+(idx+1)+'</b><br>gradiente clorofilla forte (bordo ricco/povero)<br>'+
+      pt.v.toPrecision(3)+' mg/m&sup3; &middot; '+getTimeStr(key, currentDate()));
+    stopPropClick(m); m.addTo(campoFrontLayer);
+  });
+  campoFrontInfo.innerHTML = '<b>'+segs.length+' segmenti di fronte</b> + <b>'+top.length+' punti F1&ndash;F'+top.length+
+    '</b> (gradiente max) nel campo, dato '+getTimeStr(key, currentDate())+
+    '. Sono questi i bordi di caccia dei pelagici. <b>I fronti migrano: rilancia il 21/6.</b>';
+}
+campoFrontBtn.addEventListener('click', computeCampoFronts);
 
 // Avvio
 refreshLayer();
