@@ -796,6 +796,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <div class="chkrow"><input type="checkbox" id="chkCatch" checked><label for="chkCatch">Catture storiche (71)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkForaggio" checked><label for="chkForaggio">Mappa pesce foraggio</label></div>
   <div class="chkrow"><input type="checkbox" id="chkCampoFront" checked><label for="chkCampoFront">Fronti di pesca (campo)</label></div>
+  <div class="chkrow"><input type="checkbox" id="chkTrack" checked><label for="chkTrack">Traccia barca (GPS)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkIso" checked><label for="chkIso">Isobate &ge;200 m (EMODnet)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkWind"><label for="chkWind">Vento orario (21/6, Open-Meteo)</label></div>
   <div class="chkrow"><input type="checkbox" id="chkCurr"><label for="chkCurr">Correnti orarie (21/6, Open-Meteo)</label></div>
@@ -850,6 +851,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
   <button id="expHotGpx" style="width:100%; margin-top:6px;">Esporta hot-spot GPX (per GPS di bordo)</button>
   <button id="routeBtn" style="width:100%; margin-top:6px;">Percorso ottimale alalunga (time-aware)</button>
   <button id="expRouteGpx" style="width:100%; margin-top:6px;">Esporta percorso ottimale GPX</button>
+  <div style="margin-top:8px; border-top:1px solid #24375c; padding-top:8px;">
+  <button id="trkBtn" style="width:100%;">&#9679; Registra traccia barca</button>
+  <div id="trkInfo" class="desc">Tracking GPS spento. Avvialo a bordo per registrare la rotta reale della barca.</div>
+  <button id="trkSaveBtn" style="width:100%; margin-top:4px;">Salva traccia</button>
+  <button id="trkExpBtn" style="width:100%; margin-top:4px;">Esporta traccia GPX</button>
+  <button id="trkClearBtn" style="width:100%; margin-top:4px;">Pulisci traccia corrente</button>
+  <div id="trkSaved" class="desc" style="margin-top:6px;">Nessuna traccia salvata.</div>
+  </div>
   <div class="desc" id="frontInfo">Il fronte (color line) e' il bordo tra acqua ricca e povera: campiona la vista corrente su un prodotto Mediterraneo.</div>
   <div class="row" style="margin-top:8px;">
     <button id="expCsv">Esporta punti CSV</button>
@@ -2404,6 +2413,93 @@ document.getElementById('expRouteGpx').addEventListener('click', () => {
 bindGaraToggle('chkAlaRoute', plRouteLayer);
 bindGaraToggle('chkPelagic', frontLayer);
 bindGaraToggle('chkCatch', garaCatchLayer);
+
+// =========================================================================
+// === TRACKING BARCA + REGISTRAZIONE TRACCE (GPS reale) ===================
+// watchPosition: segue la barca, registra la rotta, salva su localStorage
+// (sopravvive a reload/perdita segnale), export GPX, lista tracce salvate.
+// Richiede HTTPS (ok su GitHub Pages) e consenso posizione.
+// =========================================================================
+const trackLayer = L.layerGroup().addTo(map);
+let trkWatch=null, trkPts=[], trkLine=null, trkBoat=null, trkAcc=null;
+const TRK_CUR='gara_trk_current', TRK_SAVED='gara_trk_saved';
+const trkBtn=document.getElementById('trkBtn'), trkInfo=document.getElementById('trkInfo');
+function trkDist(pts){ let d=0; for(let i=1;i<pts.length;i++) d+=plNmDist(pts[i-1].la,pts[i-1].lo,pts[i].la,pts[i].lo); return d; }
+function trkDraw(){ if(!trkLine) trkLine=L.polyline([], {color:'#00e5ff', weight:4, opacity:0.9}).addTo(trackLayer);
+  trkLine.setLatLngs(trkPts.map(p=>[p.la,p.lo])); }
+function trkInfoUpd(){
+  const n=trkPts.length, nm=trkDist(trkPts);
+  const dur=(n>=2)?(trkPts[n-1].t-trkPts[0].t)/60000:0;
+  const last=n?trkPts[n-1]:null, sp=(last&&last.sp!=null)?(last.sp*1.94384).toFixed(1):'-';
+  trkInfo.innerHTML=(trkWatch!=null?'<b style="color:#00e5ff">REGISTRAZIONE</b> ':'Tracking fermo ')+
+    '&middot; '+n+' punti &middot; '+nm.toFixed(2)+' nm &middot; '+dur.toFixed(0)+' min &middot; '+sp+' kn';
+}
+function trkPersist(){ try{ localStorage.setItem(TRK_CUR, JSON.stringify(trkPts)); }catch(e){} }
+function trkStart(){
+  if(!navigator.geolocation){ alert('GPS non disponibile su questo dispositivo/browser.'); return; }
+  trkWatch=navigator.geolocation.watchPosition(pos=>{
+    const c=pos.coords;
+    trkPts.push({la:c.latitude, lo:c.longitude, t:pos.timestamp, acc:c.accuracy, sp:c.speed});
+    if(trkPts.length>20000) trkPts.shift();
+    trkDraw();
+    if(!trkBoat) trkBoat=L.circleMarker([c.latitude,c.longitude],{radius:7,color:'#fff',weight:2,fillColor:'#00e5ff',fillOpacity:1}).addTo(trackLayer);
+    else trkBoat.setLatLng([c.latitude,c.longitude]);
+    if(trkAcc) trackLayer.removeLayer(trkAcc);
+    trkAcc=L.circle([c.latitude,c.longitude],{radius:c.accuracy||30,color:'#00e5ff',weight:1,opacity:0.4,fillOpacity:0.08}).addTo(trackLayer);
+    trkPersist(); trkInfoUpd();
+  }, err=>{ trkInfo.innerHTML='<b style="color:#ff8da3">Errore GPS:</b> '+err.message; },
+  {enableHighAccuracy:true, maximumAge:2000, timeout:15000});
+  trkBtn.innerHTML='&#9632; Ferma tracking'; trkBtn.style.background='#7a1f2b'; trkInfoUpd();
+}
+function trkStop(){ if(trkWatch!=null){ navigator.geolocation.clearWatch(trkWatch); trkWatch=null; }
+  trkBtn.innerHTML='&#9679; Registra traccia barca'; trkBtn.style.background=''; trkInfoUpd(); }
+trkBtn.addEventListener('click', ()=>{ trkWatch!=null ? trkStop() : trkStart(); });
+function trkSavedList(){ try{ return JSON.parse(localStorage.getItem(TRK_SAVED)||'[]'); }catch(e){ return []; } }
+function trkGpx(pts, name){
+  const seg=pts.map(p=>'<trkpt lat="'+p.la.toFixed(6)+'" lon="'+p.lo.toFixed(6)+'">'+(p.t?'<time>'+new Date(p.t).toISOString()+'</time>':'')+'</trkpt>').join('\n');
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="GaraForio2026" xmlns="http://www.topografix.com/GPX/1/1">\n<trk><name>'+name+'</name><trkseg>\n'+seg+'\n</trkseg></trk>\n</gpx>';
+}
+function trkRenderSaved(){
+  const list=trkSavedList(), box=document.getElementById('trkSaved');
+  if(!list.length){ box.innerHTML='Nessuna traccia salvata.'; return; }
+  box.innerHTML=list.map((t,i)=>'&#9899; <b>'+t.name+'</b> &middot; '+t.nm.toFixed(1)+' nm '+
+    '<a href="#" data-act="show" data-i="'+i+'" style="color:#7fc4ff">mostra</a> &middot; '+
+    '<a href="#" data-act="gpx" data-i="'+i+'" style="color:#7fc4ff">gpx</a> &middot; '+
+    '<a href="#" data-act="del" data-i="'+i+'" style="color:#ff8da3">elimina</a>').join('<br>');
+}
+document.getElementById('trkSaveBtn').addEventListener('click', ()=>{
+  if(trkPts.length<2){ alert('Traccia troppo corta da salvare.'); return; }
+  const list=trkSavedList();
+  const name='Traccia '+new Date(trkPts[0].t).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  list.push({name, ts:trkPts[0].t, nm:trkDist(trkPts), pts:trkPts.slice()});
+  try{ localStorage.setItem(TRK_SAVED, JSON.stringify(list)); }catch(e){ alert('Memoria piena: esporta in GPX e poi pulisci.'); return; }
+  trkPts=[]; if(trkLine){ trackLayer.removeLayer(trkLine); trkLine=null; }
+  localStorage.removeItem(TRK_CUR); trkInfoUpd(); trkRenderSaved();
+});
+document.getElementById('trkExpBtn').addEventListener('click', ()=>{
+  if(trkPts.length<2){ alert('Nessuna traccia corrente da esportare.'); return; }
+  download('traccia_'+GARA_DATE+'.gpx', trkGpx(trkPts,'Traccia '+GARA_DATE), 'application/gpx+xml');
+});
+document.getElementById('trkClearBtn').addEventListener('click', ()=>{
+  if(!confirm('Cancellare la traccia corrente?')) return;
+  trkStop(); trkPts=[];
+  if(trkLine){ trackLayer.removeLayer(trkLine); trkLine=null; }
+  if(trkBoat){ trackLayer.removeLayer(trkBoat); trkBoat=null; }
+  if(trkAcc){ trackLayer.removeLayer(trkAcc); trkAcc=null; }
+  localStorage.removeItem(TRK_CUR); trkInfoUpd();
+});
+document.getElementById('trkSaved').addEventListener('click', (e)=>{
+  const a=e.target.closest('a'); if(!a) return; e.preventDefault();
+  const i=+a.dataset.i, list=trkSavedList(), t=list[i]; if(!t) return;
+  if(a.dataset.act==='gpx') download(t.name.replace(/[^a-z0-9]/gi,'_')+'.gpx', trkGpx(t.pts,t.name), 'application/gpx+xml');
+  else if(a.dataset.act==='del'){ list.splice(i,1); localStorage.setItem(TRK_SAVED, JSON.stringify(list)); trkRenderSaved(); }
+  else if(a.dataset.act==='show'){ L.polyline(t.pts.map(p=>[p.la,p.lo]),{color:'#ffd84a',weight:3,opacity:0.9,dashArray:'4,4'}).addTo(trackLayer);
+    map.fitBounds(L.latLngBounds(t.pts.map(p=>[p.la,p.lo])).pad(0.2)); }
+});
+// ripristino traccia corrente all'avvio (sopravvive a reload / perdita segnale)
+(function(){ try{ const s=localStorage.getItem(TRK_CUR); if(s){ trkPts=JSON.parse(s)||[]; if(trkPts.length) trkDraw(); } }catch(e){}
+  trkInfoUpd(); trkRenderSaved(); })();
+bindGaraToggle('chkTrack', trackLayer);
 
 // =========================================================================
 // === ZONE PESCE FORAGGIO (proxy da clorofilla) ===========================
