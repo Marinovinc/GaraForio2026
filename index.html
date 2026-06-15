@@ -1405,7 +1405,8 @@ async function computeFront(){
 
   frontSegments = marchingSquares(val, lats, lons, thr);
   frontLayer.clearLayers();
-  frontSegments.forEach(s => L.polyline(s, { color:'#ff2bd6', weight:3, opacity:0.95 }).addTo(frontLayer));
+  // Le isolinee del fronte NON vengono piu' disegnate: creavano un reticolo magenta
+  // che confondeva i hot-spot. Restano in frontSegments per l'export KML.
 
   // === HOT-SPOT PELAGICI (adattivo alla scena) ===
   // In estate il Tirreno attorno a Ischia e' oligotrofico: i valori assoluti
@@ -1438,17 +1439,28 @@ async function computeFront(){
   const greens = prodCells.filter(c => !c.hot).sort((a,b) => b.v - a.v).slice(0, 16);
   const shown = prodCells.filter(c => c.hot).concat(greens);
   const nHot = shown.filter(c => c.hot).length;
+  let hotN = 0;
   shown.forEach(c => {
-    L.circleMarker([lats[c.i], lons[c.j]], {
-      radius: c.hot ? 9 : 6, color: c.hot ? '#ff2bd6' : '#27c46b',
-      weight: c.hot ? 3 : 1.5, fillColor:'#27c46b', fillOpacity: c.hot ? 0.6 : 0.30
-    }).addTo(frontLayer).bindPopup(
-      '<b style="color:' + (c.hot ? '#ff2bd6' : '#27c46b') + '">' +
-      (c.hot ? 'HOT-SPOT PELAGICI' : 'Acqua produttiva') + '</b><br>' +
-      'Clorofilla: ' + c.v.toPrecision(3) + ' mg/m&sup3;<br>' +
-      'Gradiente: ' + c.g.toPrecision(2) + ' mg/m&sup3; (' + Math.round(c.relG*100) + '% vs mediana)' +
-      (c.hot ? '<br><small>Massimo relativo su fronte: qui si concentra il foraggio e cacciano i pelagici.</small>'
-             : '<br><small>Acqua piu ricca della media locale.</small>'));
+    if (c.hot){
+      hotN++;
+      L.marker([lats[c.i], lons[c.j]], { zIndexOffset:1000, icon: L.divIcon({
+        className:'', iconSize:[30,30], iconAnchor:[15,15],
+        html:'<div style="width:26px;height:26px;border-radius:50%;background:#ff1493;'+
+          'border:3px solid #fff;box-shadow:0 0 5px #000,0 0 16px #ff1493;color:#fff;'+
+          'font:700 14px sans-serif;display:flex;align-items:center;justify-content:center;">'+hotN+'</div>'
+      }) }).addTo(frontLayer).bindPopup(
+        '<b style="color:#ff1493;font-size:14px;">HOT-SPOT PELAGICI #'+hotN+'</b><br>'+
+        'Clorofilla: '+c.v.toPrecision(3)+' mg/m&sup3;<br>'+
+        'Gradiente: '+c.g.toPrecision(2)+' mg/m&sup3; ('+Math.round(c.relG*100)+'% vs mediana)'+
+        '<br><small>Massimo relativo su fronte: qui si concentra il foraggio e cacciano i pelagici.</small>');
+    } else {
+      L.circleMarker([lats[c.i], lons[c.j]], {
+        radius:5, color:'#ffffff', weight:1.5, fillColor:'#19e36a', fillOpacity:0.9
+      }).addTo(frontLayer).bindPopup(
+        '<b style="color:#13a04f">Acqua produttiva</b><br>'+
+        'Clorofilla: '+c.v.toPrecision(3)+' mg/m&sup3;'+
+        '<br><small>Acqua piu ricca della media locale.</small>');
+    }
   });
   frontInfo.innerHTML = '<span style="color:#ff2bd6">' + nHot + ' hot-spot pelagici</span> &middot; ' +
     '<span style="color:#27c46b">' + greens.length + ' acqua produttiva</span> &middot; ' +
@@ -2000,9 +2012,15 @@ async function computeForage(){
         '<br><small>proxy plancton &rarr; pesce foraggio &middot; ' + getTimeStr(key, currentDate()) + '</small>');
     stopPropClick(m); m.addTo(foraggioLayer);
   });
-  foraggioInfo.innerHTML = peaks.length
-    ? '<b>'+peaks.length+' zone</b> di clorofilla localmente alta (soglia '+thr.toPrecision(2)+' mg/m&sup3;). Proxy plancton&rarr;foraggio, <b>da confermare in mare</b>.'
-    : 'Nessun massimo locale netto in questa vista: campo di clorofilla piatto.';
+  // FRONTE (bordi) dalla STESSA griglia: il foraggio si addensa anche sul bordo ricco/povero
+  const thrFront = valid[Math.floor(valid.length/2)];   // soglia mediana adattiva
+  const segs = marchingSquares(val, lats, lons, thrFront);
+  frontSegments = segs;                                  // riusa l'export "Esporta fronte KML"
+  segs.forEach(s => L.polyline(s, { color:'#ff2bd6', weight:2, opacity:0.85 }).addTo(foraggioLayer));
+  const zoneTxt = peaks.length ? '<b>'+peaks.length+' zone</b> (massimi clorofilla, soglia '+thr.toPrecision(2)+')'
+                               : 'nessun massimo locale netto';
+  foraggioInfo.innerHTML = zoneTxt + ' + <b>fronte</b> '+segs.length+' segmenti (mediana '+thrFront.toPrecision(2)+
+    ' mg/m&sup3;). Proxy plancton&rarr;foraggio e bordi ricchi/poveri, <b>da confermare in mare</b>. Restano visibili durante l\'animazione.';
 }
 foraggioBtn.addEventListener('click', computeForage);
 
