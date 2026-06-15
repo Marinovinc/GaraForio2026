@@ -1785,17 +1785,23 @@ const G_SEGLBL = { transfer:'TRASFERIMENTO 21 nd', calata:'CALO SPREAD', fish:'I
 let G_ACTIVE_KF = G_KF, G_ACTIVE_TOTAL = G_TOTAL;
 function buildAlaKF(){
   if(!PL_ROUTE || !PL_ROUTE.seq || !PL_ROUTE.seq.length) return null;
-  const S=8.5, kf=[{t:0, p:[PL_ROUTE.start.la,PL_ROUTE.start.lo], seg:'transfer', txt:'Raduno &rarr; Sosta 1'}];
-  PL_ROUTE.seq.forEach((s,k)=>{
-    const tArr=Math.round((s.arr-S)*60), tEnd=tArr+Math.round(PL_SOSTA*60);
-    kf.push({t:tArr, p:[s.la,s.lo], seg:'fish', txt:'SOSTA '+(k+1)+' &middot; pesca (~'+plHM(s.arr)+')'});
-    kf.push({t:tEnd, p:[s.la,s.lo], seg:'transfer', txt:(k<PL_ROUTE.seq.length-1)?('Sosta '+(k+1)+' &rarr; Sosta '+(k+2)):'Rientro al Raduno'});
+  const S=8.5, seq=PL_ROUTE.seq, n=seq.length;
+  const kf=[{t:0, p:[PL_ROUTE.start.la,PL_ROUTE.start.lo], seg:'transfer', txt:'Raduno &rarr; Sosta 1'}];
+  seq.forEach((s,k)=>{
+    const tArr=Math.round((s.arr-S)*60);
+    const tFish=Math.round(((s.fishEnd!=null?s.fishEnd:Math.min(s.arr+PL_SOSTA,15.5))-S)*60);
+    kf.push({t:tArr, p:[s.la,s.lo], seg:'fish', txt:'SOSTA '+(k+1)+' &middot; pesca '+plHM(s.arr)+'&ndash;'+plHM(S+tFish/60)});
+    if(k<n-1){
+      kf.push({t:tFish, p:[s.la,s.lo], seg:'transfer', txt:'Sosta '+(k+1)+' &rarr; Sosta '+(k+2)});
+    } else {
+      // ultima sosta: si pesca fino alle 15:30, poi RIENTRO al porto = EXTRA (fuori gara)
+      kf.push({t:tFish, p:[s.la,s.lo], seg:'transfer', txt:'Fine pesca '+plHM(S+tFish/60)+' &rarr; rientro porto (extra)'});
+      const back=plNmDist(s.la,s.lo,PL_ROUTE.start.la,PL_ROUTE.start.lo)/PL_SPEED;
+      const tHome=Math.round(tFish + back*60);
+      kf.push({t:tHome, p:[PL_ROUTE.start.la,PL_ROUTE.start.lo], seg:'end', txt:'Rientro porto '+plHM(S+tHome/60)+' (fuori gara)'});
+    }
   });
-  const last=PL_ROUTE.seq[PL_ROUTE.seq.length-1];
-  const back=plNmDist(last.la,last.lo,PL_ROUTE.start.la,PL_ROUTE.start.lo)/PL_SPEED;
-  const tHome=Math.round((last.arr-S)*60 + PL_SOSTA*60 + back*60);
-  kf.push({t:tHome, p:[PL_ROUTE.start.la,PL_ROUTE.start.lo], seg:'end', txt:'Rientro Raduno &middot; '+plHM(S+tHome/60)});
-  return {kf, total:Math.max(tHome,1)};
+  return {kf, total:kf[kf.length-1].t};
 }
 
 const garaBtn = document.getElementById('garaPlayBtn');
@@ -2338,11 +2344,14 @@ function computePelagicRoute(){
   let best={score:-1, seq:[]};
   for(const perm of plPerms(cand)){
     let t=PL_T0, pos=start, score=0; const seq=[];
-    for(const i of perm){ const s=stops[i], arr=t+travelH(pos,s), back=plNmDist(s.la,s.lo,start.la,start.lo)/PL_SPEED;
-      if(arr+PL_SOSTA+back>PL_T1) break;     // non rientra entro le 15:30
-      score+=legValue(s,arr); seq.push({i,arr}); t=arr+PL_SOSTA; pos=s; }
+    for(const i of perm){ const s=stops[i], arr=t+travelH(pos,s);
+      if(arr>=PL_T1) break;                          // arrivo dopo le 15:30: niente piu' pesca
+      const fishEnd=Math.min(arr+PL_SOSTA, PL_T1);   // la pesca NON supera le 15:30
+      score+=legValue(s,arr); seq.push({i,arr,fishEnd}); t=fishEnd; pos=s; }
     if(score>best.score) best={score, seq};
   }
+  // la pesca riempie TUTTE le 7 ore: l'ultima sosta si pesca fino alle 15:30; il rientro e' EXTRA
+  if(best.seq.length) best.seq[best.seq.length-1].fishEnd = PL_T1;
   // disegno
   plRouteLayer.clearLayers();
   if(!best.seq.length){ frontInfo.textContent='Nessuna sosta rientra nei tempi gara dal Raduno.'; return; }
@@ -2358,10 +2367,10 @@ function computePelagicRoute(){
       .addTo(plRouteLayer).bindPopup('<b style="color:#caa500">SOSTA '+(k+1)+' &middot; arrivo ~'+plHM(o.arr)+'</b><br>'+
         'Valore alalunga: '+s.val.toFixed(2)+(s.pref!=null?'<br>Storico: morso ~'+plHM(s.pref):'<br>(nessuna cattura temporizzata vicina)')+
         '<br><small>'+s.la.toFixed(5)+', '+s.lo.toFixed(5)+'</small>'); });
-  PL_ROUTE={ start, seq:best.seq.map((o,k)=>({n:k+1, la:stops[o.i].la, lo:stops[o.i].lo, arr:o.arr})), nm };
+  PL_ROUTE={ start, seq:best.seq.map((o,k)=>({n:k+1, la:stops[o.i].la, lo:stops[o.i].lo, arr:o.arr, fishEnd:o.fishEnd})), nm };
   frontInfo.innerHTML='<b style="color:#ffd84a">Percorso ottimale alalunga (time-aware)</b><br>'+
-    '<small>'+best.seq.length+' soste &middot; '+nm.toFixed(1)+' nm a '+PL_SPEED+' kn &middot; rientro entro 15:30<br>'+
-    'RADUNO 08:30 &rarr; '+best.seq.map((o,k)=>(k+1)+' ('+plHM(o.arr)+')').join(' &rarr; ')+' &rarr; rientro</small>';
+    '<small>'+best.seq.length+' soste &middot; pesca 08:30&ndash;15:30 (rientro extra) &middot; '+nm.toFixed(1)+' nm a '+PL_SPEED+' kn<br>'+
+    'RADUNO 08:30 &rarr; '+best.seq.map((o,k)=>(k+1)+' ('+plHM(o.arr)+')').join(' &rarr; ')+' &rarr; pesca fino 15:30</small>';
 }
 document.getElementById('routeBtn').addEventListener('click', computePelagicRoute);
 document.getElementById('expRouteGpx').addEventListener('click', () => {
