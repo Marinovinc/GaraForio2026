@@ -2191,8 +2191,10 @@ function plScoreRender(hour){
   // FRONTE (gradiente, gia' pesato) e su quale lato si trova la cella.
   items.forEach(x=>{ x.fSst=nS(x.sstGrad); x.fEdge=nC(x.chlGrad); x.fCurr=nCu(x.curr); x.fStr=x.structScore; x.fCatch=nK(x.catchRaw);
     x.thermCoh=((x.blue?x.coolSide:!x.coolSide))?1.0:0.75;
-    // pesi: STORICO CATTURE 0.30 (ground truth, predittore piu' forte) + ambiente 0.70
-    x.spatial=(0.30*x.fCatch+0.18*x.fSst+0.18*x.fEdge+0.18*x.fCurr+0.16*x.fStr)*x.thermCoh; });
+    // VALIDAZIONE onesta (r~0.09, lift 0.32x): l'ambiente da solo NON predice le catture
+    // reali -> lo STORICO CATTURE guida la posizione (0.55); l'ambiente del giorno
+    // (corrente/fronte/struttura) e' solo una modifica fine (0.45).
+    x.spatial=(0.55*x.fCatch+0.11*x.fSst+0.11*x.fEdge+0.12*x.fCurr+0.11*x.fStr)*x.thermCoh; });
   items.sort((a,b)=>b.spatial-a.spatial);
   const top=items.slice(0,6);
   PL_HOTSPOTS=top;   // per l'export GPX dei waypoint
@@ -2219,7 +2221,7 @@ function plScoreRender(hour){
   const winOut = a && (a.sunrise<8 && a.sunset>15 && (a.transit<8 || a.transit>15));   // alba/tramonto/transito fuori orario gara
   frontInfo.innerHTML='<b style="color:#ff1493">'+top.length+' hot-spot pelagici</b> nel campo &middot; ora '+String(hour).padStart(2,'0')+':00<br>'+
     '<small><b style="color:#ffd84a">&#9888; Hot-spot da SATELLITE del '+dDato+'</b> (il 21/06 non esiste ancora): pattern recente, NON il giorno gara. Vento/corrente sono previsione 21/06.<br>'+
-    'Spaziale: storico catture + SST/clorofilla/corrente+marea/struttura &middot; Temporale: luna/sole/corrente/vento<br>'+
+    'Posizione guidata da STORICO CATTURE 71 pt (validato) &middot; ambiente=modifica del giorno &middot; Tempo: luna/sole/corrente/vento<br>'+
     (a?'Sole '+plHM(a.sunrise)+'&ndash;'+plHM(a.sunset)+' &middot; Luna ~'+Math.round(a.phase*100)+'% (stima) &middot; transito '+plHM(a.transit)+
        ' &middot; <b>finestra interna ~'+plHM(bestH)+'</b>'+(winOut?' &middot; <i>alba/luna fuori orario gara: ranking guidato da corrente+vento</i>':'')
      :'')+'</small>';
