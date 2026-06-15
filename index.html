@@ -766,7 +766,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
   .gara-label.hot  { color:#27c46b; border-color:#27c46b; }
   .gara-label.reef { color:#7fc4ff; border-color:#3a6ea8; }
   .leaflet-tooltip.gara-label:before { display:none; }
-  .meteo-arrow svg { filter: drop-shadow(0 0 2px #000) drop-shadow(0 0 1px #000); overflow:visible; }
+  .meteo-arrow svg { opacity:0.55; filter: drop-shadow(0 0 1px #000); overflow:visible; }
   #legend .gara-leg { display:flex; align-items:center; gap:6px; margin-top:4px; font-size:10.5px; color:#bcd; }
   #legend .gara-leg.ramp { flex-wrap:wrap; gap:2px; }
   #legend .sw { display:inline-block; width:13px; height:9px; border-radius:2px; border:1px solid rgba(0,0,0,.4); }
@@ -834,12 +834,14 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <input type="checkbox" id="sstChk">
     <label for="sstChk">Temperatura mare (SST) sopra</label>
   </div>
-  <button id="frontBtn">Calcola fronte clorofilla (vista attuale)</button>
+  <button id="frontBtn">Trova hot-spot pelagici (vista attuale)</button>
   <div class="desc" id="frontInfo">Il fronte (color line) e' il bordo tra acqua ricca e povera: campiona la vista corrente su un prodotto Mediterraneo.</div>
   <div class="row" style="margin-top:8px;">
     <button id="expCsv">Esporta punti CSV</button>
     <button id="expKml">Esporta fronte KML</button>
   </div>
+  <button id="foraggioBtn" style="width:100%; margin-top:8px;">Mappa pesce foraggio (clorofilla)</button>
+  <div class="desc" id="foraggioInfo">Stima indicativa: marca le zone con clorofilla localmente alta (plancton &rarr; foraggio) nella vista corrente. NON e' un rilevatore di pesce.</div>
 
   <hr class="sep">
   <label>Percorso animato (barca nel tempo)</label>
@@ -1405,37 +1407,56 @@ async function computeFront(){
   frontLayer.clearLayers();
   frontSegments.forEach(s => L.polyline(s, { color:'#ff2bd6', weight:3, opacity:0.95 }).addTo(frontLayer));
 
-  // Evidenzia le celle nella FINESTRA FORAGGIO (0.20-0.50 mg/m3) e gli HOT-SPOT
-  // pelagici = cella foraggio con alto gradiente verso i vicini (bordo di fronte).
-  let nForage = 0, nHot = 0;
+  // === HOT-SPOT PELAGICI (adattivo alla scena) ===
+  // In estate il Tirreno attorno a Ischia e' oligotrofico: i valori assoluti
+  // sono bassi ovunque (spesso 0.05-0.15), quindi conta la struttura RELATIVA.
+  // Mare ricco -> finestra assoluta 0.20-0.50; mare povero -> celle sopra la
+  // mediana della vista (acqua piu' produttiva) e fronti relativi (gradiente
+  // forte rispetto alla mediana). Cosi' i punti compaiono in ogni stagione.
+  const med = thr;                       // mediana della vista (gia' calcolata)
+  const absMode = med >= CHL_FORAGE_LO;  // true solo se la scena e' davvero ricca
+  const cand = [];
   for (let i = 0; i < N; i++){
     for (let j = 0; j < N; j++){
       const v = val[i][j];
-      if (isNaN(v) || v < CHL_FORAGE_LO || v > CHL_FORAGE_HI) continue;
-      nForage++;
+      if (isNaN(v)) continue;
+      const productive = absMode ? (v >= CHL_FORAGE_LO && v <= CHL_FORAGE_HI) : (v >= med);
+      if (!productive) continue;
       let g = 0;
       [[i-1,j],[i+1,j],[i,j-1],[i,j+1]].forEach(([a,b]) => {
         if (a>=0 && a<N && b>=0 && b<N && !isNaN(val[a][b])) g = Math.max(g, Math.abs(v - val[a][b]));
       });
-      const hot = g >= GRAD_FRONT;
-      if (hot) nHot++;
-      L.circleMarker([lats[i], lons[j]], {
-        radius: hot ? 9 : 6, color: hot ? '#ff2bd6' : '#27c46b',
-        weight: hot ? 3 : 1.5, fillColor:'#27c46b', fillOpacity: hot ? 0.55 : 0.30
-      }).addTo(frontLayer).bindPopup(
-        '<b style="color:' + (hot ? '#ff2bd6' : '#27c46b') + '">' +
-        (hot ? 'HOT-SPOT PELAGICI' : 'Foraggio') + '</b><br>' +
-        'Clorofilla: ' + v.toPrecision(3) + ' mg/m&sup3;<br>' +
-        'Gradiente: ' + g.toPrecision(2) + ' mg/m&sup3;' +
-        (hot ? '<br><small>Foraggio sul bordo di fronte: zona di caccia dei grandi pelagici.</small>'
-             : '<br><small>Macchia produttiva: base trofica, cerca il suo bordo.</small>'));
+      const relG = med > 0 ? g / med : 0;
+      const hot = absMode ? (g >= GRAD_FRONT) : (relG >= 0.25);
+      cand.push({ i, j, v, g, relG, hot });
     }
   }
-  frontInfo.innerHTML = 'Fronte: ' + frontSegments.length + ' segmenti (soglia ' +
-    thr.toPrecision(3) + ' mg/m&sup3;) &middot; <span style="color:#27c46b">' + nForage +
-    ' celle foraggio</span> &middot; <span style="color:#ff2bd6">' + nHot + ' hot-spot pelagici</span>';
+  // garantisci sempre i 3 fronti relativi piu' marcati come hot-spot
+  cand.slice().sort((a,b) => b.relG - a.relG).slice(0,3).forEach(c => c.hot = true);
+  let nForage = cand.length, nHot = 0;
+  cand.forEach(c => {
+    if (c.hot) nHot++;
+    L.circleMarker([lats[c.i], lons[c.j]], {
+      radius: c.hot ? 9 : 6, color: c.hot ? '#ff2bd6' : '#27c46b',
+      weight: c.hot ? 3 : 1.5, fillColor:'#27c46b', fillOpacity: c.hot ? 0.55 : 0.30
+    }).addTo(frontLayer).bindPopup(
+      '<b style="color:' + (c.hot ? '#ff2bd6' : '#27c46b') + '">' +
+      (c.hot ? 'HOT-SPOT PELAGICI' : 'Acqua produttiva') + '</b><br>' +
+      'Clorofilla: ' + c.v.toPrecision(3) + ' mg/m&sup3;<br>' +
+      'Gradiente: ' + c.g.toPrecision(2) + ' mg/m&sup3; (' + Math.round(c.relG*100) + '% vs mediana)' +
+      (c.hot ? '<br><small>Massimo relativo su fronte: qui si concentra il foraggio e cacciano i pelagici.</small>'
+             : '<br><small>Acqua piu ricca della media locale.</small>'));
+  });
+  frontInfo.innerHTML = 'Fronte: ' + frontSegments.length + ' segmenti &middot; ' +
+    '<span style="color:#27c46b">' + nForage + ' celle produttive</span> &middot; ' +
+    '<span style="color:#ff2bd6">' + nHot + ' hot-spot pelagici</span><br>' +
+    '<small>Vista: ' + valid[0].toPrecision(2) + '&ndash;' + valid[valid.length-1].toPrecision(2) +
+    ' mg/m&sup3; &middot; mediana ' + med.toPrecision(2) + ' &middot; modo ' +
+    (absMode ? 'assoluto' : 'relativo (oligotrofico)') + '</small>';
 }
 frontBtn.addEventListener('click', computeFront);
+// Primo calcolo automatico degli hot-spot all'avvio (cosi' i punti si vedono subito)
+setTimeout(() => { try { computeFront(); } catch(e){} }, 2800);
 
 // === EXPORT fronte KML ===
 document.getElementById('expKml').addEventListener('click', () => {
@@ -1870,7 +1891,7 @@ function meteoArrow(bearing, color, lenPx, width){
       'style="transform:rotate('+bearing+'deg)">' +
       '<line x1="'+cx+'" y1="'+yTail+'" x2="'+cx+'" y2="'+yTip+'" stroke="'+color+'" '+
         'stroke-width="'+w+'" stroke-linecap="round"/>' +
-      '<polyline points="'+(cx-5)+','+(yTip+8)+' '+cx+','+yTip+' '+(cx+5)+','+(yTip+8)+'" '+
+      '<polyline points="'+(cx-4)+','+(yTip+6)+' '+cx+','+yTip+' '+(cx+4)+','+(yTip+6)+'" '+
         'fill="none" stroke="'+color+'" stroke-width="'+w+'" stroke-linecap="round" stroke-linejoin="round"/>' +
     '</svg>';
   return L.divIcon({ className:'meteo-arrow', html:svg, iconSize:[box,box], iconAnchor:[box/2, box/2] });
@@ -1894,15 +1915,15 @@ function renderMeteoHour(){
     if (wantW){
       const wd=meteoData.wind[k].hourly.wind_direction_10m[ti], ws=meteoData.wind[k].hourly.wind_speed_10m[ti];
       if (wd!=null && ws!=null){
-        const b=(wd+180)%360, len=Math.max(16, Math.min(40, 12+ws*2.4));   // verso cui SOFFIA, lunghezza ~ intensita'
-        L.marker(pt,{ icon:meteoArrow(b, colorFor(ws, WIND_RAMP), len, 3), pane:'meteoPane', interactive:false }).addTo(windLayer);
+        const b=(wd+180)%360, len=Math.max(11, Math.min(26, 8+ws*1.6));   // verso cui SOFFIA, lunghezza ~ intensita'
+        L.marker(pt,{ icon:meteoArrow(b, colorFor(ws, WIND_RAMP), len, 1.6), pane:'meteoPane', interactive:false }).addTo(windLayer);
       }
     }
     if (wantC){
       const cd=meteoData.curr[k].hourly.ocean_current_direction[ti], cv=meteoData.curr[k].hourly.ocean_current_velocity[ti];
       if (cd!=null && cv!=null){
-        const kn=cv*0.539957, b=cd%360, len=Math.max(20, Math.min(40, 18+kn*34));   // verso cui SCORRE (km/h->kn); correnti deboli -> base alta
-        L.marker(pt,{ icon:meteoArrow(b, colorFor(kn, CURR_RAMP), len, 3.4), pane:'meteoPane', interactive:false }).addTo(currLayer);
+        const kn=cv*0.539957, b=cd%360, len=Math.max(13, Math.min(26, 11+kn*24));   // verso cui SCORRE (km/h->kn); correnti deboli -> base alta
+        L.marker(pt,{ icon:meteoArrow(b, colorFor(kn, CURR_RAMP), len, 1.8), pane:'meteoPane', interactive:false }).addTo(currLayer);
       }
     }
   });
@@ -1924,6 +1945,63 @@ async function onMeteoToggle(){
 }
 document.getElementById('chkWind').addEventListener('change', onMeteoToggle);
 document.getElementById('chkCurr').addEventListener('change', onMeteoToggle);
+
+// =========================================================================
+// === ZONE PESCE FORAGGIO (proxy da clorofilla) ===========================
+// ONESTO: NON e' un fish-finder. Campiona la clorofilla reale (GetFeatureInfo)
+// sulla vista corrente e marca i MASSIMI LOCALI sopra soglia: l'acqua ricca di
+// clorofilla concentra plancton -> pesce foraggio (acciughe/sardine) -> predatori.
+// Indicazione da confermare in mare (ecoscandaglio/uccelli/mangianze).
+// =========================================================================
+const foraggioLayer = L.layerGroup().addTo(map);
+const foraggioBtn = document.getElementById('foraggioBtn');
+const foraggioInfo = document.getElementById('foraggioInfo');
+async function computeForage(){
+  const key = sel.value, p = PRODUCTS[key];
+  if (!p.point){ foraggioInfo.textContent = 'Serve un prodotto Mediterraneo (la sorgente PACE non da il valore puntuale).'; return; }
+  const b = map.getBounds(), N = 12;
+  const lats = [], lons = [];
+  for (let i=0;i<N;i++) lats.push(b.getNorth() - (b.getNorth()-b.getSouth())*i/(N-1));
+  for (let j=0;j<N;j++) lons.push(b.getWest()  + (b.getEast()-b.getWest())  *j/(N-1));
+  foraggioBtn.disabled = true;
+  const cells = []; for (let i=0;i<N;i++) for (let j=0;j<N;j++) cells.push([i,j]);
+  let done = 0;
+  const flat = await pool(cells, 8, async ([i,j]) => {
+    const r = await sampleValue(p, key, lats[i], lons[j]);
+    foraggioInfo.textContent = 'Analisi clorofilla... ' + (++done) + '/' + cells.length;
+    return (r && !r.error && r.raw != null) ? r.raw : NaN;
+  });
+  foraggioBtn.disabled = false;
+  const val = Array.from({length:N}, (_,i) => flat.slice(i*N, i*N+N));
+  const valid = flat.filter(v => !isNaN(v)).sort((a,b)=>a-b);
+  if (valid.length < 10){ foraggioInfo.textContent = 'Dati insufficienti (nuvole/terra) in questa vista. Prova un altro giorno o il prodotto L4 gapfree.'; return; }
+  const thr = valid[Math.floor(valid.length*0.6)];           // soglia: 60° percentile del campo
+  const vmin = valid[0], vmax = valid[valid.length-1];
+  foraggioLayer.clearLayers();
+  const peaks = [];
+  for (let i=1;i<N-1;i++) for (let j=1;j<N-1;j++){
+    const v = val[i][j]; if (isNaN(v) || v < thr) continue;
+    let isMax = true;
+    for (let di=-1; di<=1 && isMax; di++) for (let dj=-1; dj<=1; dj++){
+      if (!di && !dj) continue;
+      const nv = val[i+di][j+dj];
+      if (!isNaN(nv) && nv > v){ isMax = false; break; }
+    }
+    if (isMax) peaks.push({ lat:lats[i], lon:lons[j], v });
+  }
+  peaks.forEach(pk => {
+    const norm = vmax>vmin ? (pk.v-vmin)/(vmax-vmin) : 0.5;
+    const m = L.circleMarker([pk.lat,pk.lon], { radius: 7 + 12*norm, color:'#1f7a3f', weight:2,
+      fillColor:'#39e27a', fillOpacity:0.45 })
+      .bindPopup('<b>Zona ricca di clorofilla</b><br>' + pk.v.toPrecision(3) + ' mg/m&sup3;' +
+        '<br><small>proxy plancton &rarr; pesce foraggio &middot; ' + getTimeStr(key, currentDate()) + '</small>');
+    stopPropClick(m); m.addTo(foraggioLayer);
+  });
+  foraggioInfo.innerHTML = peaks.length
+    ? '<b>'+peaks.length+' zone</b> di clorofilla localmente alta (soglia '+thr.toPrecision(2)+' mg/m&sup3;). Proxy plancton&rarr;foraggio, <b>da confermare in mare</b>.'
+    : 'Nessun massimo locale netto in questa vista: campo di clorofilla piatto.';
+}
+foraggioBtn.addEventListener('click', computeForage);
 
 // Avvio
 refreshLayer();
