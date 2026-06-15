@@ -838,6 +838,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
   </div>
   <button id="frontBtn">Calcola indice pelagico (campo gara)</button>
   <button id="expHotGpx" style="width:100%; margin-top:6px;">Esporta hot-spot GPX (per GPS di bordo)</button>
+  <button id="routeBtn" style="width:100%; margin-top:6px;">Percorso ottimale alalunga (time-aware)</button>
+  <button id="expRouteGpx" style="width:100%; margin-top:6px;">Esporta percorso ottimale GPX</button>
   <div class="desc" id="frontInfo">Il fronte (color line) e' il bordo tra acqua ricca e povera: campiona la vista corrente su un prodotto Mediterraneo.</div>
   <div class="row" style="margin-top:8px;">
     <button id="expCsv">Esporta punti CSV</button>
@@ -2244,6 +2246,7 @@ async function computePelagicHotspots(){
       PL_WINDBYHOUR[h]=cnt?sum/cnt:null; } }
   if(!PL_GRID) await plSampleGrid();
   plScoreRender(garaShowHour||10);
+  try { computePelagicRoute(); } catch(e){}   // percorso ottimale auto dopo i hot-spot
 }
 // gli hot-spot seguono l'orologio di gara (corrente oraria) durante l'animazione
 try { const _plSync=syncMeteoHour; syncMeteoHour=function(absMin){ _plSync(absMin); if(PL_GRID) plScoreRender(Math.floor(absMin/60)%24); }; } catch(e){}
@@ -2262,6 +2265,88 @@ document.getElementById('expHotGpx').addEventListener('click', () => {
     '<gpx version="1.1" creator="GaraForio2026" xmlns="http://www.topografix.com/GPX/1/1">\n' +
     wpt + '\n</gpx>';
   download('hotspot_pelagici_'+GARA_DATE+'.gpx', gpx, 'application/gpx+xml');
+});
+
+// =========================================================================
+// === PERCORSO OTTIMALE TIME-AWARE (priorita' ALALUNGA) ===================
+// Orienteering con vincolo orario: parte dal Raduno alle 08:30, traina ~6.7 kn,
+// rientra entro le 15:30, sempre puntando le soste a piu' alto VALORE ALALUNGA
+// (densita' catture pesata) ALL'ORA giusta (le catture ALA/TS hanno l'orario nel
+// nome -> "ora storica di morso"). Brute-force sulle permutazioni dei migliori
+// candidati. ONESTO: la parte temporale poggia su poche catture con orario.
+// =========================================================================
+const PL_SPEED=6.7, PL_SOSTA=0.6, PL_T0=8.5, PL_T1=15.5;   // kn, h sosta, start, rientro
+let PL_ROUTE=null;
+const plRouteLayer = L.layerGroup().addTo(map);
+function plCatchHour(nm){
+  const toks=nm.trim().split(/\s+/);
+  for(let k=toks.length-1;k>=0;k--){ const t=toks[k];
+    let m=t.match(/^(\d{1,2}):(\d{2})$/); if(m){ const h=+m[1]+(+m[2])/60; if(h>=0&&h<24) return h; }
+    if(/^\d{3,4}$/.test(t)){ const hh=t.length===3?+t.slice(0,1):+t.slice(0,2), mm=+t.slice(-2); if(hh>=0&&hh<24&&mm<60) return hh+mm/60; }
+  }
+  return null;
+}
+function plAlaValue(la,lo){   // densita' catture pesata verso l'alalunga
+  let s=0; for(const w of G_CATCH){ const d=plNmDist(la,lo,w.la,w.lo);
+    const wt = w.sp==='alalunga'?2.2 : (w.sp==='tonno'||w.sp==='spada')?1.3 : (w.sp==='mark'?0.7:0.4);
+    s += wt*Math.exp(-(d*d)/(2*1.2*1.2)); }
+  return s;
+}
+function plStopPrefHour(la,lo){   // ora preferita dalle catture temporizzate vicine
+  let sum=0,wsum=0;
+  for(const w of G_CATCH){ const h=plCatchHour(w.nm); if(h==null) continue;
+    const d=plNmDist(la,lo,w.la,w.lo); if(d>2.0) continue;
+    const wt=(w.sp==='alalunga'?2:1)*Math.exp(-(d*d)/(2*1.0*1.0)); sum+=wt*h; wsum+=wt; }
+  return wsum>0?sum/wsum:null;
+}
+function plPerms(arr){ if(arr.length<=1) return [arr]; const out=[];
+  arr.forEach((v,i)=>{ const rest=arr.slice(0,i).concat(arr.slice(i+1)); plPerms(rest).forEach(p=>out.push([v].concat(p))); }); return out; }
+function computePelagicRoute(){
+  if(!PL_HOTSPOTS||!PL_HOTSPOTS.length){ frontInfo.textContent='Calcola prima l\'indice pelagico.'; return; }
+  const start={la:G_RADUNO.ll[0], lo:G_RADUNO.ll[1]};
+  const stops=PL_HOTSPOTS.map(x=>({la:x.la, lo:x.lo, val:plAlaValue(x.la,x.lo), pref:plStopPrefHour(x.la,x.lo)}));
+  const travelH=(a,b)=>plNmDist(a.la,a.lo,b.la,b.lo)/PL_SPEED;
+  const legValue=(s,h)=> s.val * (s.pref!=null ? Math.exp(-Math.pow((h-s.pref)/2.0,2)/2) : Math.max(0.4, Math.min(1, plTemporalScore(Math.round(h))*2)));
+  // permuta i migliori 5 candidati per valore (5!=120, economico)
+  const cand=stops.map((_,i)=>i).sort((a,b)=>stops[b].val-stops[a].val).slice(0,5);
+  let best={score:-1, seq:[]};
+  for(const perm of plPerms(cand)){
+    let t=PL_T0, pos=start, score=0; const seq=[];
+    for(const i of perm){ const s=stops[i], arr=t+travelH(pos,s), back=plNmDist(s.la,s.lo,start.la,start.lo)/PL_SPEED;
+      if(arr+PL_SOSTA+back>PL_T1) break;     // non rientra entro le 15:30
+      score+=legValue(s,arr); seq.push({i,arr}); t=arr+PL_SOSTA; pos=s; }
+    if(score>best.score) best={score, seq};
+  }
+  // disegno
+  plRouteLayer.clearLayers();
+  if(!best.seq.length){ frontInfo.textContent='Nessuna sosta rientra nei tempi gara dal Raduno.'; return; }
+  const path=[[start.la,start.lo]].concat(best.seq.map(o=>[stops[o.i].la,stops[o.i].lo]));
+  path.push([start.la,start.lo]);
+  let nm=0; for(let k=1;k<path.length;k++) nm+=plNmDist(path[k-1][0],path[k-1][1],path[k][0],path[k][1]);
+  L.polyline(path,{color:'#ffd84a',weight:3,dashArray:'7,5',opacity:0.95,pane:'markerPane'}).addTo(plRouteLayer);
+  L.marker([start.la,start.lo],{icon:L.divIcon({className:'',iconSize:[60,18],iconAnchor:[30,9],
+    html:'<div style="background:#0b1220;color:#ffd84a;border:1px solid #ffd84a;border-radius:4px;font:700 9px sans-serif;text-align:center;padding:1px 2px;">RADUNO 08:30</div>'})}).addTo(plRouteLayer);
+  best.seq.forEach((o,k)=>{ const s=stops[o.i];
+    L.marker([s.la,s.lo],{zIndexOffset:1200,icon:L.divIcon({className:'',iconSize:[34,34],iconAnchor:[17,17],
+      html:'<div style="width:30px;height:30px;border-radius:50%;background:#ffd84a;border:3px solid #0b1220;color:#0b1220;font:800 14px sans-serif;display:flex;align-items:center;justify-content:center;box-shadow:0 0 6px #000;">'+(k+1)+'</div>'})})
+      .addTo(plRouteLayer).bindPopup('<b style="color:#caa500">SOSTA '+(k+1)+' &middot; arrivo ~'+plHM(o.arr)+'</b><br>'+
+        'Valore alalunga: '+s.val.toFixed(2)+(s.pref!=null?'<br>Storico: morso ~'+plHM(s.pref):'<br>(nessuna cattura temporizzata vicina)')+
+        '<br><small>'+s.la.toFixed(5)+', '+s.lo.toFixed(5)+'</small>'); });
+  PL_ROUTE={ start, seq:best.seq.map((o,k)=>({n:k+1, la:stops[o.i].la, lo:stops[o.i].lo, arr:o.arr})), nm };
+  frontInfo.innerHTML='<b style="color:#ffd84a">Percorso ottimale alalunga (time-aware)</b><br>'+
+    '<small>'+best.seq.length+' soste &middot; '+nm.toFixed(1)+' nm a '+PL_SPEED+' kn &middot; rientro entro 15:30<br>'+
+    'RADUNO 08:30 &rarr; '+best.seq.map((o,k)=>(k+1)+' ('+plHM(o.arr)+')').join(' &rarr; ')+' &rarr; rientro</small>';
+}
+document.getElementById('routeBtn').addEventListener('click', computePelagicRoute);
+document.getElementById('expRouteGpx').addEventListener('click', () => {
+  if(!PL_ROUTE){ alert('Calcola prima il percorso ottimale.'); return; }
+  const wpt=[{n:'RADUNO',la:PL_ROUTE.start.la,lo:PL_ROUTE.start.lo,arr:8.5}].concat(PL_ROUTE.seq.map(s=>({n:'SOSTA '+s.n,la:s.la,lo:s.lo,arr:s.arr})))
+    .map(s=>'<wpt lat="'+s.la.toFixed(5)+'" lon="'+s.lo.toFixed(5)+'"><name>'+s.n+' '+plHM(s.arr)+'</name></wpt>').join('\n');
+  const rte='<rte><name>Percorso alalunga '+GARA_DATE+'</name>\n'+
+    [{la:PL_ROUTE.start.la,lo:PL_ROUTE.start.lo}].concat(PL_ROUTE.seq).concat([{la:PL_ROUTE.start.la,lo:PL_ROUTE.start.lo}])
+    .map(s=>'<rtept lat="'+s.la.toFixed(5)+'" lon="'+s.lo.toFixed(5)+'"></rtept>').join('\n')+'\n</rte>';
+  const gpx='<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="GaraForio2026" xmlns="http://www.topografix.com/GPX/1/1">\n'+wpt+'\n'+rte+'\n</gpx>';
+  download('percorso_alalunga_'+GARA_DATE+'.gpx', gpx, 'application/gpx+xml');
 });
 
 // =========================================================================
