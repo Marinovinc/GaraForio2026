@@ -1416,7 +1416,7 @@ async function computeFront(){
   const med = thr;                                       // mediana della vista
   const p75 = valid[Math.floor(0.75 * (valid.length - 1))];   // quartile superiore
   const absMode = med >= CHL_FORAGE_LO;                  // true solo se la scena e' ricca
-  const cells = [];
+  const prodCells = [];
   for (let i = 0; i < N; i++){
     for (let j = 0; j < N; j++){
       const v = val[i][j];
@@ -1427,16 +1427,16 @@ async function computeFront(){
       [[i-1,j],[i+1,j],[i,j-1],[i,j+1]].forEach(([a,b]) => {
         if (a>=0 && a<N && b>=0 && b<N && !isNaN(val[a][b])) g = Math.max(g, Math.abs(v - val[a][b]));
       });
-      cells.push({ i, j, v, g, relG: med > 0 ? g / med : 0 });
+      prodCells.push({ i, j, v, g, relG: med > 0 ? g / med : 0 });
     }
   }
   // hot-spot = i fronti relativi piu' marcati (max 8); le altre celle produttive
   // piu' ricche (max 16) restano come "acqua produttiva" verde. Niente tappeto.
-  cells.sort((a,b) => b.relG - a.relG);
+  prodCells.sort((a,b) => b.relG - a.relG);
   const HOT_MAX = 8;
-  cells.forEach((c, idx) => c.hot = idx < HOT_MAX && (absMode ? c.g >= GRAD_FRONT : c.relG >= 0.15));
-  const greens = cells.filter(c => !c.hot).sort((a,b) => b.v - a.v).slice(0, 16);
-  const shown = cells.filter(c => c.hot).concat(greens);
+  prodCells.forEach((c, idx) => c.hot = idx < HOT_MAX && (absMode ? c.g >= GRAD_FRONT : c.relG >= 0.15));
+  const greens = prodCells.filter(c => !c.hot).sort((a,b) => b.v - a.v).slice(0, 16);
+  const shown = prodCells.filter(c => c.hot).concat(greens);
   const nHot = shown.filter(c => c.hot).length;
   shown.forEach(c => {
     L.circleMarker([lats[c.i], lons[c.j]], {
