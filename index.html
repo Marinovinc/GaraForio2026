@@ -837,6 +837,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <label for="sstChk">Temperatura mare (SST) sopra</label>
   </div>
   <button id="frontBtn">Calcola indice pelagico (campo gara)</button>
+  <button id="expHotGpx" style="width:100%; margin-top:6px;">Esporta hot-spot GPX (per GPS di bordo)</button>
   <div class="desc" id="frontInfo">Il fronte (color line) e' il bordo tra acqua ricca e povera: campiona la vista corrente su un prodotto Mediterraneo.</div>
   <div class="row" style="margin-top:8px;">
     <button id="expCsv">Esporta punti CSV</button>
@@ -2019,7 +2020,7 @@ function plMoonEvents(y,m,d,lat,lon){
 function plHM(h){ if(h==null||isNaN(h)) return 'n/d'; const hh=Math.floor(h), mm=Math.round((h-hh)*60); return String(hh).padStart(2,'0')+':'+String(mm%60).padStart(2,'0'); }
 function plBell(h,c,w){ if(c==null) return 0; let d=Math.abs(h-c); d=Math.min(d,24-d); return Math.exp(-(d*d)/(2*w*w)); }
 
-let PL_ASTRO=null, PL_CURRBYHOUR=null, PL_WINDBYHOUR=null, PL_GRID=null;
+let PL_ASTRO=null, PL_CURRBYHOUR=null, PL_WINDBYHOUR=null, PL_GRID=null, PL_HOTSPOTS=[];
 // Vento (nodi): fattore di attivita'/pescabilita'. Ottimale brezza 3-14 kn.
 function plWindFactor(kn){ if(kn==null||isNaN(kn)) return 0.5;
   if(kn<3) return 0.45;     // calma piatta: predatori diffidenti / in profondita'
@@ -2073,6 +2074,8 @@ function plScoreRender(hour){
   const {N,lats,lons,chl,sst,ring}=PL_GRID;
   const flatChl=chl.flat().filter(v=>!isNaN(v)).sort((a,b)=>a-b);
   const chlMed=flatChl.length?flatChl[Math.floor(flatChl.length/2)]:0;
+  const flatSst=sst.flat().filter(v=>!isNaN(v)).sort((a,b)=>a-b);
+  const sstMed=flatSst.length?flatSst[Math.floor(flatSst.length/2)]:NaN;   // mediana termica del campo
   const items=[];
   for(let i=0;i<N;i++)for(let j=0;j<N;j++){
     if(!pointInPoly(lats[i],lons[j],ring)) continue;
@@ -2081,16 +2084,23 @@ function plScoreRender(hour){
     let dmin=1e9; PL_STRUCT.forEach(s=>{ const d=plNmDist(lats[i],lons[j],s[0],s[1]); if(d<dmin)dmin=d; });
     items.push({ la:lats[i], lo:lons[j], c, t,
       sstGrad:plGrad(sst,i,j,N), chlGrad:plGrad(chl,i,j,N), curr:plCurrentAt(lats[i],lons[j],hour),
-      structScore:Math.exp(-(dmin*dmin)/8), thermSuit:isNaN(t)?0.5:Math.exp(-Math.pow((t-20)/4,2)/2),
-      blue:!isNaN(c)&&c<chlMed });
+      structScore:Math.exp(-(dmin*dmin)/8),
+      blue:!isNaN(c)&&c<chlMed,
+      coolSide:!isNaN(t)&&!isNaN(sstMed)&&t<sstMed });   // lato freddo del fronte termico
   }
   if(!items.length){ frontInfo.textContent='Dati insufficienti nel campo (nuvole).'; return; }
   const norm=key=>{ const a=items.map(x=>x[key]).filter(v=>!isNaN(v)); const mn=Math.min(...a),mx=Math.max(...a); return v=>(isNaN(v)||mx<=mn)?0:(v-mn)/(mx-mn); };
   const nS=norm('sstGrad'), nC=norm('chlGrad'), nCu=norm('curr');
+  // Coerenza termica RELATIVA (scientifica): alalunga/blu cacciano sul lato FREDDO+blu del
+  // fronte; i tonni di branco sul lato CALDO+produttivo. Niente finestra termica assoluta:
+  // a giugno la SST di superficie e' ~24C ovunque, un assoluto sarebbe fuorviante. Conta il
+  // FRONTE (gradiente, gia' pesato) e su quale lato si trova la cella.
   items.forEach(x=>{ x.fSst=nS(x.sstGrad); x.fEdge=nC(x.chlGrad); x.fCurr=nCu(x.curr); x.fStr=x.structScore;
-    x.spatial=(0.25*x.fSst+0.25*x.fEdge+0.25*x.fCurr+0.25*x.fStr)*(0.6+0.4*x.thermSuit); });
+    x.thermCoh=((x.blue?x.coolSide:!x.coolSide))?1.0:0.75;
+    x.spatial=(0.25*x.fSst+0.25*x.fEdge+0.25*x.fCurr+0.25*x.fStr)*x.thermCoh; });
   items.sort((a,b)=>b.spatial-a.spatial);
   const top=items.slice(0,6);
+  PL_HOTSPOTS=top;   // per l'export GPX dei waypoint
   frontLayer.clearLayers();
   let n=0;
   top.forEach(x=>{ n++;
@@ -2138,6 +2148,22 @@ async function computePelagicHotspots(){
 }
 // gli hot-spot seguono l'orologio di gara (corrente oraria) durante l'animazione
 try { const _plSync=syncMeteoHour; syncMeteoHour=function(absMin){ _plSync(absMin); if(PL_GRID) plScoreRender(Math.floor(absMin/60)%24); }; } catch(e){}
+
+// === EXPORT HOT-SPOT GPX (waypoint per il GPS/cartografico di bordo) ===
+document.getElementById('expHotGpx').addEventListener('click', () => {
+  if(!PL_HOTSPOTS || !PL_HOTSPOTS.length){ alert('Nessun hot-spot calcolato. Premi prima "Calcola indice pelagico".'); return; }
+  const wpt = PL_HOTSPOTS.map((x,k) => {
+    const g = x.blue ? 'alalunga-aguglia-spada' : 'tonno di branco';
+    return '<wpt lat="'+x.la.toFixed(5)+'" lon="'+x.lo.toFixed(5)+'">' +
+      '<name>HS'+(k+1)+' '+g+'</name>' +
+      '<desc>Indice '+(x.spatial*100).toFixed(0)+'/100; SST '+(isNaN(x.t)?'n/d':x.t.toFixed(1)+'C')+
+      '; chl '+(isNaN(x.c)?'n/d':x.c.toPrecision(2))+' mg/m3; lato '+(x.blue?'blu':'produttivo')+'</desc></wpt>';
+  }).join('\n');
+  const gpx = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<gpx version="1.1" creator="GaraForio2026" xmlns="http://www.topografix.com/GPX/1/1">\n' +
+    wpt + '\n</gpx>';
+  download('hotspot_pelagici_'+GARA_DATE+'.gpx', gpx, 'application/gpx+xml');
+});
 
 // =========================================================================
 // === ZONE PESCE FORAGGIO (proxy da clorofilla) ===========================
