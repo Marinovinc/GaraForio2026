@@ -669,6 +669,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
 
 </style>
 <style>
+  /* Coordbox + Mirino centrale (Fadenkreuz) */
+  #coordbox { position:absolute; bottom:10px; left:10px; z-index:1000; background:rgba(13,22,38,0.85); color:#bfe3ff; border:1px solid #2c416c; border-radius:6px; padding:3px 9px; font-size:11px; font-family:Consolas,monospace; pointer-events:none; }
+  #mapCrosshair { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); pointer-events:none; z-index:600; }
+  #mapCrosshair .ch-h, #mapCrosshair .ch-v { position:absolute; top:50%; left:50%; background:rgba(255,255,255,0.92); box-shadow:0 0 2px rgba(0,0,0,0.95); }
+  #mapCrosshair .ch-h { width:46px; height:1.5px; transform:translate(-50%,-50%); }
+  #mapCrosshair .ch-v { width:1.5px; height:46px; transform:translate(-50%,-50%); }
+  #mapCrosshair .ch-dot { position:absolute; top:50%; left:50%; width:5px; height:5px; background:#ff2bd6; border-radius:50%; transform:translate(-50%,-50%); box-shadow:0 0 3px rgba(0,0,0,0.95); }
   :root { --bg:#0d1626; --panel:#13213a; --accent:#27c46b; --accent2:#e94560; --txt:#e8eef6; }
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; font-family: "Segoe UI", system-ui, sans-serif; color:var(--txt); }
@@ -780,6 +787,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
 </head>
 <body>
 <div id="map"></div>
+<div id="coordbox">-</div>
+<div id="mapCrosshair"><div class="ch-h"></div><div class="ch-v"></div><div class="ch-dot"></div></div>
 <button id="toggleBtn">Filtri</button>
 
 <div id="panel">
@@ -1266,8 +1275,8 @@ async function chlGradient(p, key, lat, lon, d){
 
 // === CLICK -> VALORE PUNTUALE (clorofilla + SST se attiva) ===
 const samples = [];   // punti campionati, per export CSV
-map.on('click', async (e) => {
-  if (routeMode){ addWaypoint(e.latlng); return; }   // in modalita' disegno: aggiungi punto al percorso
+map.on('dblclick', async (e) => {
+  if (routeMode){ return; }   // in disegno percorso il doppio-click non legge il valore
   const key = sel.value;
   const p = PRODUCTS[key];
   const lat = e.latlng.lat, lon = e.latlng.lng;
@@ -1316,6 +1325,16 @@ map.on('click', async (e) => {
   samples.push({ date, product: key, lat: lat.toFixed(5), lon: lon.toFixed(5),
     chl: chl.raw, uom: chl.uom, sst_c: sstC != null ? sstC.toFixed(2) : '' });
 });
+
+// === COORDINATE = MIRINO CENTRALE (Fadenkreuz, formato nautico N/E gradi-minuti) ===
+function fmtDM(v, isLat){ const h = isLat ? (v>=0?'N':'S') : (v>=0?'E':'O');
+  const a = Math.abs(v), d = Math.floor(a), m = (a-d)*60; return h + ' ' + d + ' ' + m.toFixed(3) + "'"; }
+const coordbox = document.getElementById('coordbox');
+function showCoords(ll){ coordbox.innerHTML = '<span style="color:#ff2bd6;font-weight:bold;">&#8982;</span> ' + fmtDM(ll.lat,true) + '   ' + fmtDM(ll.lng,false); }
+map.on('click', e => { if (routeMode) addWaypoint(e.latlng); });   // singolo click/tap: punto percorso (se in disegno)
+map.doubleClickZoom.disable();   // il doppio-click/tap apre il popup valore, non zooma
+map.on('move', () => showCoords(map.getCenter()));   // coordinate seguono il mirino (centro) - desktop e mobile
+showCoords(map.getCenter());
 
 // === GEOLOCALIZZAZIONE ===
 document.getElementById('geoBtn').addEventListener('click', () => {
