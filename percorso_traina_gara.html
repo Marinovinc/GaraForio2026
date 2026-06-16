@@ -143,9 +143,14 @@ map.fitBounds(L.latLngBounds(VERTICI).pad(0.08));
 #ovl .spot{border-left:4px solid #1a6f9b;background:rgba(255,255,255,.045);padding:9px 13px;margin:9px 0;border-radius:0 8px 8px 0}
 #ovl .spot.peak{border-left-color:#ffd000}
 #ovl .spot b{color:#bfe3ff} #ovl .meta{color:#9fb0c8;font-size:12.5px}
+#panelToggle{position:absolute;top:52px;right:10px;z-index:1200;cursor:pointer;border:1px solid #2c416c;background:#16284a;color:#e8eef6;border-radius:8px;padding:9px 13px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+#panelToggle:hover{background:#1e3a63}
+#panel{transition:transform .25s ease}
+#panel.collapsed{transform:translateY(-135%)}
 </style>
 
 <button id="panoramaBtn">&#128506; Panoramica &amp; spiegazioni</button>
+<button id="panelToggle">&#10005; Comandi</button>
 <div id="ovl"><div class="card">
 <span class="close" id="ovlClose">&times;</span>
 <h2>Campo gara Forio &mdash; panoramica e spiegazioni</h2>
@@ -202,6 +207,11 @@ map.fitBounds(L.latLngBounds(VERTICI).pad(0.08));
 <script>
 (function(){
   var btn=document.getElementById('panoramaBtn'),ovl=document.getElementById('ovl'),cl=document.getElementById('ovlClose');
+  var pt=document.getElementById('panelToggle'),pn=document.getElementById('panel');
+  if(pt&&pn){
+    pt.addEventListener('click',function(){var c=pn.classList.toggle('collapsed');pt.innerHTML=(c?'☰':'✕')+' Comandi';});
+    if(window.innerWidth<640){pn.classList.add('collapsed');pt.innerHTML='☰ Comandi';}
+  }
   btn.addEventListener('click',function(){ovl.classList.add('open');});
   cl.addEventListener('click',function(){ovl.classList.remove('open');});
   ovl.addEventListener('click',function(e){if(e.target===ovl)ovl.classList.remove('open');});
